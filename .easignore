@@ -1,0 +1,61 @@
+# EAS Build ignore file
+# Files and directories listed here will not be uploaded to EAS Build
+
+# Development files
+.git/
+.github/
+.vscode/
+.idea/
+.local/
+
+# Server files (not needed for mobile app)
+server/
+server_dist/
+drizzle/
+
+# Documentation
+*.md
+!README.md
+CHEAT_SHEET.md
+
+# Test files
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+
+# Build artifacts
+dist/
+build/
+.expo/
+.expo-shared/
+
+# Dependencies (will be installed during build)
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files (use EAS Secrets instead)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.DS_Store
+Thumbs.db
+
+# Scripts not needed for build
+scripts/fix-dependencies.js
+scripts/generate-app-icons.js
+analyze-bundle.js
+
+# Attached assets (development only)
+attached_assets/
+
+# Patches (will be applied during build)
+patches/
