@@ -16,7 +16,6 @@ drizzle/
 # Documentation
 *.md
 !README.md
-CHEAT_SHEET.md
 
 # Test files
 **/__tests__/
@@ -30,9 +29,6 @@ dist/
 build/
 .expo/
 .expo-shared/
-
-# Dependencies (will be installed during build)
-node_modules/
 
 # Logs
 *.log
@@ -59,3 +55,7 @@ attached_assets/
 
 # Patches (will be applied during build)
 patches/
+
+# Android/iOS native directories (EAS will generate these)
+android/
+ios/

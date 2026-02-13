@@ -33,17 +33,10 @@
         "cache": {
           "key": "mavrixfy-production-cache",
           "paths": ["node_modules", ".expo"]
-        },
-        "gradleCommand": ":app:assembleRelease",
-        "env": {
-          "NODE_ENV": "production"
         }
       },
       "ios": {},
-      "channel": "production",
-      "env": {
-        "EXPO_USE_FAST_RESOLVER": "1"
-      }
+      "channel": "production"
     },
     "production-aab": {
       "android": {

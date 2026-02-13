@@ -49,9 +49,7 @@
       "softwareKeyboardLayoutMode": "pan",
       "jsEngine": "hermes",
       "enableProguardInReleaseBuilds": true,
-      "enableShrinkResourcesInReleaseBuilds": true,
-      "extraProguardRules": "-keep class com.facebook.hermes.unicode.** { *; }\n-keep class com.facebook.jni.** { *; }",
-      "useLegacyPackaging": false
+      "enableShrinkResourcesInReleaseBuilds": true
     },
     "plugins": [
       [
