@@ -6,26 +6,12 @@ module.exports = function (api) {
         "babel-preset-expo",
         {
           unstable_transformImportMeta: true,
-          lazyImports: true,
         }
       ]
     ],
-    plugins: [
-      [
-        "module-resolver",
-        {
-          alias: {
-            "@": "./",
-          },
-        },
-      ],
-    ],
     env: {
       production: {
-        plugins: [
-          "transform-remove-console",
-          ["react-native-paper/babel", { "env": "production" }],
-        ],
+        plugins: ["transform-remove-console"],
       },
     },
   };
