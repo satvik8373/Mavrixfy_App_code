@@ -1,9 +1,36 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Audio, AVPlaybackStatus } from "expo-av";
-import { Song, formatDuration } from "@/lib/musicData";
+import { Platform } from "react-native";
+import { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
+
+// Conditionally import TrackPlayer only for native platforms
+let TrackPlayer: any = null;
+let State: any = null;
+let Event: any = null;
+let usePlaybackState: any = null;
+let useProgress: any = null;
+let RepeatMode: any = null;
+let setupPlayer: any = null;
+
+// Only import TrackPlayer on native platforms (not web or Expo Go)
+if (Platform.OS !== 'web') {
+  try {
+    const trackPlayerModule = require("react-native-track-player");
+    TrackPlayer = trackPlayerModule.default;
+    State = trackPlayerModule.State;
+    Event = trackPlayerModule.Event;
+    usePlaybackState = trackPlayerModule.usePlaybackState;
+    useProgress = trackPlayerModule.useProgress;
+    RepeatMode = trackPlayerModule.RepeatMode;
+    
+    const trackPlayerLib = require("@/lib/trackPlayer");
+    setupPlayer = trackPlayerLib.setupPlayer;
+  } catch (error) {
+    console.warn('TrackPlayer not available:', error);
+  }
+}
 
 interface PlayerState {
   currentSong: Song | null;
@@ -43,20 +70,33 @@ interface PlayerContextValue extends PlayerState {
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
+function songToTrack(song: Song): any {
+  const audioUrl = song.audioUrl?.trim() || '';
+  
+  return {
+    id: song.id,
+    url: audioUrl,
+    title: song.title,
+    artist: song.artist,
+    artwork: song.coverUrl,
+    duration: song.duration || 0,
+  };
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  let authUser: { id: string } | null = null;
-  try {
-    const authCtx = useAuth();
-    authUser = authCtx.user;
-  } catch {}
+  const [isPlayerReady, setIsPlayerReady] = useState(false);
+  
+  // Get auth context properly
+  const { user: authUser } = useAuth();
+
+  // Use TrackPlayer hooks only if available
+  const playbackState = (usePlaybackState && TrackPlayer) ? usePlaybackState() : { state: null };
+  const progressData = (useProgress && TrackPlayer) ? useProgress() : { position: 0, duration: 0 };
+  const { position, duration: trackDuration } = progressData;
 
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [positionMillis, setPositionMillis] = useState(0);
   const [isShuffled, setIsShuffled] = useState(false);
   const [repeatMode, setRepeatMode] = useState<"off" | "all" | "one">("off");
   const [likedSongIds, setLikedSongIds] = useState<string[]>([]);
@@ -65,7 +105,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [albumColor, setAlbumColor] = useState("#282828");
   const [textColor, setTextColor] = useState("#FFFFFF");
 
-  const soundRef = useRef<Audio.Sound | null>(null);
   const queueRef = useRef<Song[]>([]);
   const queueIndexRef = useRef(0);
   const repeatModeRef = useRef<"off" | "all" | "one">("off");
@@ -75,105 +114,148 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
 
-  useEffect(() => {
-    const setup = async () => {
-      try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
-      } catch {}
+  const isPlaying = State && playbackState.state === State.Playing;
+  const progress = trackDuration > 0 ? position / trackDuration : 0;
+  const positionMillis = position * 1000;
+  const duration = trackDuration * 1000;
 
-      if (authUser?.id) {
-        try {
-          console.log("🔐 Loading liked songs for authenticated user:", authUser.id);
-          const firestoreSongs = await getLikedSongsFromFirestore(authUser.id);
-          console.log(`✅ Loaded ${firestoreSongs.length} liked songs from Firestore`);
-          
-          // Get local liked songs
-          const localIds = await Storage.getLikedSongIds();
-          const localData = await Storage.getLikedSongsData();
-          
-          // Sync local songs to Firestore if user just logged in
-          if (localData.length > 0) {
-            console.log(`🔄 Syncing ${localData.length} local liked songs to Firestore...`);
-            for (const song of localData) {
-              if (!firestoreSongs.find(s => s.id === song.id)) {
-                try {
-                  await addLikedSongToFirestore(authUser.id, song);
-                  console.log(`✅ Synced song: ${song.title}`);
-                } catch (err) {
-                  console.error(`❌ Failed to sync song: ${song.title}`, err);
-                }
-              }
-            }
-            // Reload from Firestore after sync
-            const updatedSongs = await getLikedSongsFromFirestore(authUser.id);
-            setLikedSongs(updatedSongs);
-            setLikedSongIds(updatedSongs.map(s => s.id));
-          } else {
-            setLikedSongs(firestoreSongs);
-            setLikedSongIds(firestoreSongs.map(s => s.id));
-          }
-        } catch (error) {
-          console.error("❌ Error loading liked songs from Firestore:", error);
-          console.log("⚠️ Falling back to local storage");
-          const ids = await Storage.getLikedSongIds();
-          const data = await Storage.getLikedSongsData();
-          setLikedSongIds(ids);
-          setLikedSongs(data);
+  useEffect(() => {
+    let mounted = true;
+    
+    const setup = async () => {
+      if (!TrackPlayer || !setupPlayer) {
+        if (mounted) {
+          setIsPlayerReady(false);
         }
-      } else {
-        console.log("👤 Loading liked songs from local storage (guest mode)");
-        const ids = await Storage.getLikedSongIds();
-        const data = await Storage.getLikedSongsData();
-        console.log(`✅ Loaded ${data.length} liked songs from local storage`);
-        setLikedSongIds(ids);
-        setLikedSongs(data);
+        return;
+      }
+      
+      try {
+        await setupPlayer();
+        if (mounted) {
+          setIsPlayerReady(true);
+        }
+      } catch (error) {
+        if (mounted) {
+          setIsPlayerReady(false);
+        }
       }
     };
+    
     setup();
-    return () => { if (soundRef.current) soundRef.current.unloadAsync(); };
-  }, [authUser?.id]);
 
-  const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-    setPositionMillis(status.positionMillis);
-    if (status.durationMillis) {
-      setDuration(status.durationMillis);
-      setProgress(status.positionMillis / status.durationMillis);
-    }
-    setIsPlaying(status.isPlaying);
-    setIsLoading(status.isBuffering);
-    if (status.didJustFinish) handleSongFinished();
+    return () => {
+      mounted = false;
+      if (TrackPlayer) {
+        TrackPlayer.reset().catch(() => {});
+      }
+    };
   }, []);
 
-  const handleSongFinished = useCallback(() => {
-    const cq = queueRef.current;
-    const ci = queueIndexRef.current;
-    const cr = repeatModeRef.current;
-    if (cr === "one") { soundRef.current?.replayAsync(); return; }
-    let ni = ci + 1;
-    if (ni >= cq.length) {
-      if (cr === "all") ni = 0;
-      else { setIsPlaying(false); setProgress(0); setPositionMillis(0); return; }
-    }
-    const ns = cq[ni];
-    if (ns) loadAndPlaySong(ns, undefined, ni);
+  useEffect(() => {
+    let mounted = true;
+    
+    const loadLikedSongs = async () => {
+      try {
+        if (authUser?.id) {
+          const firestoreSongs = await getLikedSongsFromFirestore(authUser.id);
+          if (!mounted) return;
+          
+          const localData = await Storage.getLikedSongsData();
+          
+          if (localData.length > 0 && firestoreSongs.length === 0) {
+            for (const song of localData) {
+              if (!mounted) return;
+              try {
+                await addLikedSongToFirestore(authUser.id, song);
+              } catch (err) {
+                // Silent fail
+              }
+            }
+            if (!mounted) return;
+            const updatedSongs = await getLikedSongsFromFirestore(authUser.id);
+            if (mounted) {
+              setLikedSongs(updatedSongs);
+              setLikedSongIds(updatedSongs.map(s => s.id));
+            }
+          } else if (firestoreSongs.length > 0) {
+            if (mounted) {
+              setLikedSongs(firestoreSongs);
+              setLikedSongIds(firestoreSongs.map(s => s.id));
+            }
+          } else {
+            if (mounted) {
+              setLikedSongs([]);
+              setLikedSongIds([]);
+            }
+          }
+        } else {
+          const ids = await Storage.getLikedSongIds();
+          const data = await Storage.getLikedSongsData();
+          if (mounted) {
+            setLikedSongIds(ids);
+            setLikedSongs(data);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          try {
+            const ids = await Storage.getLikedSongIds();
+            const data = await Storage.getLikedSongsData();
+            setLikedSongIds(ids);
+            setLikedSongs(data);
+          } catch (e) {
+            // Silent fail
+          }
+        }
+      }
+    };
+    
+    loadLikedSongs();
+
+    return () => {
+      mounted = false;
+    };
+  }, [authUser?.id]);
+
+  useEffect(() => {
+    if (!TrackPlayer || !Event) return;
+    
+    const subscription = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, async () => {
+      try {
+        const cr = repeatModeRef.current;
+        if (cr === "all") {
+          await TrackPlayer.skip(0);
+          await TrackPlayer.play();
+        }
+      } catch (error) {
+        // Silent fail
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
   const loadAndPlaySong = useCallback(async (song: Song, newQueue?: Song[], newIndex?: number) => {
     try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
+      }
+      
       setIsLoading(true);
-      if (soundRef.current) { await soundRef.current.unloadAsync(); soundRef.current = null; }
       setCurrentSong(song);
-      setProgress(0);
-      setPositionMillis(0);
-      if (newQueue !== undefined) { setQueue(newQueue); queueRef.current = newQueue; originalQueueRef.current = newQueue; }
-      if (newIndex !== undefined) { setQueueIndex(newIndex); queueIndexRef.current = newIndex; }
+      
+      if (newQueue !== undefined) { 
+        setQueue(newQueue); 
+        queueRef.current = newQueue; 
+        originalQueueRef.current = newQueue;
+      }
+      if (newIndex !== undefined) { 
+        setQueueIndex(newIndex); 
+        queueIndexRef.current = newIndex; 
+      }
 
       Storage.addRecentlyPlayed({
         id: song.id,
@@ -183,20 +265,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         data: song,
       });
 
-      if (!song.audioUrl) { setIsLoading(false); return; }
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: song.audioUrl },
-        { shouldPlay: true, progressUpdateIntervalMillis: 250 },
-        onPlaybackStatusUpdate
-      );
-      soundRef.current = sound;
-      setIsPlaying(true);
+      if (!song.audioUrl) { 
+        setIsLoading(false); 
+        return; 
+      }
+
+      await TrackPlayer.reset();
+      
+      const validSongs = (newQueue || [song]).filter(s => s.audioUrl && s.audioUrl.trim() !== '');
+      
+      if (validSongs.length === 0) {
+        setIsLoading(false);
+        return;
+      }
+      
+      const tracks = validSongs.map(songToTrack);
+      await TrackPlayer.add(tracks);
+      
+      const validIndex = validSongs.findIndex(s => s.id === song.id);
+      await TrackPlayer.skip(validIndex >= 0 ? validIndex : 0);
+      await TrackPlayer.play();
+      
+      if (RepeatMode) {
+        const repeatMap = {
+          "off": RepeatMode.Off,
+          "all": RepeatMode.Queue,
+          "one": RepeatMode.Track,
+        };
+        await TrackPlayer.setRepeatMode(repeatMap[repeatModeRef.current]);
+      }
+      
       setIsLoading(false);
     } catch (error) {
-      console.error("Error loading audio:", error);
       setIsLoading(false);
     }
-  }, [onPlaybackStatusUpdate]);
+  }, [isPlayerReady]);
 
   const playSong = useCallback((song: Song, newQueue?: Song[]) => {
     const q = newQueue || [song];
@@ -205,48 +308,88 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [loadAndPlaySong]);
 
   const togglePlay = useCallback(async () => {
-    if (!soundRef.current) return;
-    const status = await soundRef.current.getStatusAsync();
-    if (!status.isLoaded) return;
-    if (status.isPlaying) await soundRef.current.pauseAsync();
-    else await soundRef.current.playAsync();
-  }, []);
-
-  const nextSong = useCallback(() => {
-    const cq = queueRef.current;
-    const ci = queueIndexRef.current;
-    if (cq.length === 0) return;
-    let ni = ci + 1;
-    if (ni >= cq.length) {
-      if (repeatModeRef.current === "all") ni = 0; else return;
+    try {
+      if (!isPlayerReady || !TrackPlayer || !State) {
+        return;
+      }
+      const state = await TrackPlayer.getPlaybackState();
+      if (state.state === State.Playing) {
+        await TrackPlayer.pause();
+      } else {
+        await TrackPlayer.play();
+      }
+    } catch (error) {
+      // Silent fail
     }
-    const ns = cq[ni];
-    if (ns) loadAndPlaySong(ns, undefined, ni);
-  }, [loadAndPlaySong]);
+  }, [isPlayerReady]);
+
+  const nextSong = useCallback(async () => {
+    try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
+      }
+      const cq = queueRef.current;
+      const ci = queueIndexRef.current;
+      if (cq.length === 0) return;
+      
+      let ni = ci + 1;
+      if (ni >= cq.length) {
+        if (repeatModeRef.current === "all") ni = 0; 
+        else return;
+      }
+      
+      await TrackPlayer.skipToNext();
+      setQueueIndex(ni);
+      queueIndexRef.current = ni;
+      setCurrentSong(cq[ni]);
+    } catch (error) {
+      // Silent fail
+    }
+  }, [isPlayerReady]);
 
   const prevSong = useCallback(async () => {
-    const cq = queueRef.current;
-    const ci = queueIndexRef.current;
-    if (cq.length === 0) return;
-    if (positionMillis > 3000) {
-      await soundRef.current?.setPositionAsync(0);
-      return;
+    try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
+      }
+      const cq = queueRef.current;
+      const ci = queueIndexRef.current;
+      if (cq.length === 0) return;
+      
+      if (position > 3) {
+        await TrackPlayer.seekTo(0);
+        return;
+      }
+      
+      let pi = ci - 1;
+      if (pi < 0) pi = cq.length - 1;
+      
+      await TrackPlayer.skipToPrevious();
+      setQueueIndex(pi);
+      queueIndexRef.current = pi;
+      setCurrentSong(cq[pi]);
+    } catch (error) {
+      // Silent fail
     }
-    let pi = ci - 1;
-    if (pi < 0) pi = cq.length - 1;
-    const ps = cq[pi];
-    if (ps) loadAndPlaySong(ps, undefined, pi);
-  }, [positionMillis, loadAndPlaySong]);
+  }, [position, isPlayerReady]);
 
   const seekTo = useCallback(async (p: number) => {
-    if (!soundRef.current || !duration) return;
-    const posMs = Math.floor(p * duration);
-    await soundRef.current.setPositionAsync(posMs);
-    setProgress(p);
-    setPositionMillis(posMs);
-  }, [duration]);
+    try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
+      }
+      if (!trackDuration) return;
+      const posSeconds = p * trackDuration;
+      await TrackPlayer.seekTo(posSeconds);
+    } catch (error) {
+      // Silent fail
+    }
+  }, [trackDuration, isPlayerReady]);
 
   const toggleShuffle = useCallback(() => {
+    if (!isPlayerReady || !TrackPlayer) {
+      return;
+    }
     setIsShuffled(prev => {
       const next = !prev;
       if (next) {
@@ -263,6 +406,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         queueRef.current = shuffled;
         setQueueIndex(0);
         queueIndexRef.current = 0;
+        
+        TrackPlayer.reset().then(() => {
+          const validSongs = shuffled.filter(s => s.audioUrl && s.audioUrl.trim() !== '');
+          TrackPlayer.add(validSongs.map(songToTrack)).then(() => {
+            TrackPlayer.skip(0);
+            TrackPlayer.play();
+          }).catch(() => {});
+        }).catch(() => {});
       } else {
         const orig = originalQueueRef.current;
         const cs = queueRef.current[queueIndexRef.current];
@@ -271,104 +422,172 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         queueRef.current = orig;
         setQueueIndex(origIdx >= 0 ? origIdx : 0);
         queueIndexRef.current = origIdx >= 0 ? origIdx : 0;
+        
+        TrackPlayer.reset().then(() => {
+          const validSongs = orig.filter(s => s.audioUrl && s.audioUrl.trim() !== '');
+          TrackPlayer.add(validSongs.map(songToTrack)).then(() => {
+            const validIdx = validSongs.findIndex(s => s.id === cs?.id);
+            TrackPlayer.skip(validIdx >= 0 ? validIdx : 0);
+            TrackPlayer.play();
+          }).catch(() => {});
+        }).catch(() => {});
       }
       return next;
     });
-  }, []);
+  }, [isPlayerReady]);
 
-  const toggleRepeat = useCallback(() => {
+  const toggleRepeat = useCallback(async () => {
+    if (!isPlayerReady || !TrackPlayer || !RepeatMode) {
+      return;
+    }
     setRepeatMode(prev => {
       const next = prev === "off" ? "all" : prev === "all" ? "one" : "off";
       repeatModeRef.current = next;
+      
+      const repeatMap = {
+        "off": RepeatMode.Off,
+        "all": RepeatMode.Queue,
+        "one": RepeatMode.Track,
+      };
+      TrackPlayer.setRepeatMode(repeatMap[next]).catch(() => {});
+      
       return next;
     });
-  }, []);
+  }, [isPlayerReady]);
 
   const toggleLike = useCallback(async (song: Song) => {
     const isCurrentlyLiked = likedSongIds.includes(song.id);
+    
     if (isCurrentlyLiked) {
-      // Unlike song
       setLikedSongIds(prev => prev.filter(id => id !== song.id));
       setLikedSongs(prev => prev.filter(s => s.id !== song.id));
       await Storage.removeLikedSong(song.id);
       if (authUser?.id) {
-        try {
-          await removeLikedSongFromFirestore(authUser.id, song.id);
-          console.log(`✅ Removed "${song.title}" from Firestore`);
-        } catch (error) {
-          console.error(`❌ Failed to remove "${song.title}" from Firestore:`, error);
-        }
+        await removeLikedSongFromFirestore(authUser.id, song.id);
       }
     } else {
-      // Like song
       setLikedSongIds(prev => [song.id, ...prev]);
       setLikedSongs(prev => [song, ...prev]);
       await Storage.addLikedSong(song);
       if (authUser?.id) {
-        try {
-          await addLikedSongToFirestore(authUser.id, song);
-          console.log(`✅ Added "${song.title}" to Firestore`);
-        } catch (error) {
-          console.error(`❌ Failed to add "${song.title}" to Firestore:`, error);
-        }
+        await addLikedSongToFirestore(authUser.id, song);
       }
     }
-  }, [likedSongIds, authUser?.id]);
+  }, [likedSongIds, authUser]);
 
   const isLiked = useCallback((songId: string) => likedSongIds.includes(songId), [likedSongIds]);
 
-  const addToQueue = useCallback((song: Song) => {
-    setQueue(prev => {
-      const next = [...prev, song];
-      queueRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const playNext = useCallback((song: Song) => {
-    setQueue(prev => {
-      const ci = queueIndexRef.current;
-      const next = [...prev];
-      next.splice(ci + 1, 0, song);
-      queueRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const removeFromQueue = useCallback((index: number) => {
-    setQueue(prev => {
-      const next = prev.filter((_, i) => i !== index);
-      queueRef.current = next;
-      if (index < queueIndexRef.current) {
-        const ni = queueIndexRef.current - 1;
-        setQueueIndex(ni);
-        queueIndexRef.current = ni;
+  const addToQueue = useCallback(async (song: Song) => {
+    try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
       }
-      return next;
-    });
-  }, []);
-
-  const clearQueue = useCallback(() => {
-    const cs = currentSong;
-    if (cs) {
-      setQueue([cs]);
-      queueRef.current = [cs];
-      setQueueIndex(0);
-      queueIndexRef.current = 0;
+      if (!song.audioUrl || song.audioUrl.trim() === '') {
+        return;
+      }
+      
+      setQueue(prev => {
+        const next = [...prev, song];
+        queueRef.current = next;
+        return next;
+      });
+      await TrackPlayer.add(songToTrack(song));
+    } catch (error) {
+      // Silent fail
     }
-  }, [currentSong]);
+  }, [isPlayerReady]);
 
-  const shuffleQueue = useCallback(() => {
-    const ci = queueIndexRef.current;
-    const upcoming = queueRef.current.slice(ci + 1);
-    for (let i = upcoming.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [upcoming[i], upcoming[j]] = [upcoming[j], upcoming[i]];
+  const playNext = useCallback(async (song: Song) => {
+    try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
+      }
+      if (!song.audioUrl || song.audioUrl.trim() === '') {
+        return;
+      }
+      
+      setQueue(prev => {
+        const ci = queueIndexRef.current;
+        const next = [...prev];
+        next.splice(ci + 1, 0, song);
+        queueRef.current = next;
+        return next;
+      });
+      const ci = queueIndexRef.current;
+      await TrackPlayer.add(songToTrack(song), ci + 1);
+    } catch (error) {
+      // Silent fail
     }
-    const newQ = [...queueRef.current.slice(0, ci + 1), ...upcoming];
-    setQueue(newQ);
-    queueRef.current = newQ;
-  }, []);
+  }, [isPlayerReady]);
+
+  const removeFromQueue = useCallback(async (index: number) => {
+    try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
+      }
+      setQueue(prev => {
+        const next = prev.filter((_, i) => i !== index);
+        queueRef.current = next;
+        if (index < queueIndexRef.current) {
+          const ni = queueIndexRef.current - 1;
+          setQueueIndex(ni);
+          queueIndexRef.current = ni;
+        }
+        return next;
+      });
+      await TrackPlayer.remove(index);
+    } catch (error) {
+      // Silent fail
+    }
+  }, [isPlayerReady]);
+
+  const clearQueue = useCallback(async () => {
+    try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
+      }
+      const cs = currentSong;
+      if (cs) {
+        setQueue([cs]);
+        queueRef.current = [cs];
+        setQueueIndex(0);
+        queueIndexRef.current = 0;
+        await TrackPlayer.reset();
+        await TrackPlayer.add(songToTrack(cs));
+      }
+    } catch (error) {
+      // Silent fail
+    }
+  }, [currentSong, isPlayerReady]);
+
+  const shuffleQueue = useCallback(async () => {
+    try {
+      if (!isPlayerReady || !TrackPlayer) {
+        return;
+      }
+      const ci = queueIndexRef.current;
+      const upcoming = queueRef.current.slice(ci + 1);
+      for (let i = upcoming.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [upcoming[i], upcoming[j]] = [upcoming[j], upcoming[i]];
+      }
+      const newQ = [...queueRef.current.slice(0, ci + 1), ...upcoming];
+      setQueue(newQ);
+      queueRef.current = newQ;
+      
+      await TrackPlayer.reset();
+      
+      const validSongs = newQ.filter(s => s.audioUrl && s.audioUrl.trim() !== '');
+      await TrackPlayer.add(validSongs.map(songToTrack));
+      
+      const currentSongId = newQ[ci]?.id;
+      const validIndex = validSongs.findIndex(s => s.id === currentSongId);
+      await TrackPlayer.skip(validIndex >= 0 ? validIndex : 0);
+      await TrackPlayer.play();
+    } catch (error) {
+      // Silent fail
+    }
+  }, [isPlayerReady]);
 
   const value = useMemo(() => ({
     currentSong, queue, queueIndex, isPlaying, progress, duration, positionMillis,

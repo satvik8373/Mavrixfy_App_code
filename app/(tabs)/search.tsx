@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   ScrollView,
+  FlatList,
   Pressable,
   StyleSheet,
   Platform,
@@ -57,14 +58,24 @@ export default function SearchScreen() {
       const songsData = await songsRes.json();
       const playlistsData = await playlistsRes.json();
 
+      // Handle songs - support both formats
       if (songsData.success && songsData.data?.results) {
         setSongResults(songsData.data.results.map(convertJioSaavnSong));
+      } else if (songsData.data?.results) {
+        setSongResults(songsData.data.results.map(convertJioSaavnSong));
+      } else if (Array.isArray(songsData.results)) {
+        setSongResults(songsData.results.map(convertJioSaavnSong));
       } else {
         setSongResults([]);
       }
 
+      // Handle playlists - support both formats
       if (playlistsData.success && playlistsData.data?.results) {
         setPlaylistResults(playlistsData.data.results);
+      } else if (playlistsData.data?.results) {
+        setPlaylistResults(playlistsData.data.results);
+      } else if (Array.isArray(playlistsData.results)) {
+        setPlaylistResults(playlistsData.results);
       } else {
         setPlaylistResults([]);
       }
@@ -123,6 +134,34 @@ export default function SearchScreen() {
   const hasResults = songResults.length > 0 || playlistResults.length > 0;
   const showBrowse = query.length < 2;
 
+  // Render search results properly via FlatList
+  const renderItem = useCallback(({ item }: { item: Song }) => {
+    return <SongRow song={item} queue={songResults} />;
+  }, [songResults]);
+
+  const renderPlaylist = useCallback(({ item: playlist }: { item: PlaylistResult }) => {
+    return (
+      <Pressable
+        style={styles.playlistCard}
+        onPress={() =>
+          router.push({
+            pathname: "/playlist/[id]",
+            params: { id: playlist.id, jiosaavn: "true" },
+          })
+        }
+      >
+        <Image
+          source={{ uri: getBestImageUrl(playlist.image) }}
+          style={styles.playlistCover}
+          contentFit="cover"
+        />
+        <Text style={styles.playlistName} numberOfLines={2}>
+          {playlist.name}
+        </Text>
+      </Pressable>
+    );
+  }, [router]);
+
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       <Text style={styles.header}>Search</Text>
@@ -143,79 +182,77 @@ export default function SearchScreen() {
         )}
       </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[styles.content, { paddingBottom: 120 }]}
-        showsVerticalScrollIndicator={false}
-      >
-        {showBrowse && (
-          <>
-            <Text style={styles.sectionTitle}>Browse All</Text>
-            <View style={styles.genreGrid}>
-              {genres.map((genre) => (
-                <Pressable
-                  key={genre.id}
-                  style={[styles.genreCard, { backgroundColor: genre.color }]}
-                  onPress={() => handleGenrePress(genre.name)}
-                >
-                  <Text style={styles.genreName}>{genre.name}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </>
-        )}
-
-        {!showBrowse && isLoading && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={Colors.primary} />
-          </View>
-        )}
-
-        {!showBrowse && !isLoading && !hasResults && (
-          <View style={styles.empty}>
-            <Ionicons name="search-outline" size={48} color={Colors.inactive} />
-            <Text style={styles.emptyText}>No results found</Text>
-          </View>
-        )}
-
-        {!isLoading && songResults.length > 0 && (
-          <>
-            <Text style={styles.sectionTitle}>Songs</Text>
-            {songResults.map((song) => (
-              <SongRow key={song.id} song={song} queue={songResults} />
+      {showBrowse ? (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[styles.content, { paddingBottom: 160 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.sectionTitle}>Browse All</Text>
+          <View style={styles.genreGrid}>
+            {genres.map((genre) => (
+              <Pressable
+                key={genre.id}
+                style={[styles.genreCard, { backgroundColor: genre.color }]}
+                onPress={() => handleGenrePress(genre.name)}
+              >
+                <Text style={styles.genreName}>{genre.name}</Text>
+              </Pressable>
             ))}
-          </>
-        )}
+          </View>
+        </ScrollView>
+      ) : (
+        <>
+          {isLoading && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+            </View>
+          )}
 
-        {!isLoading && playlistResults.length > 0 && (
-          <>
-            <Text style={styles.sectionTitle}>Playlists</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.playlistScroll}>
-              {playlistResults.map((playlist) => (
-                <Pressable
-                  key={playlist.id}
-                  style={styles.playlistCard}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/playlist/[id]",
-                      params: { id: playlist.id, jiosaavn: "true" },
-                    })
-                  }
-                >
-                  <Image
-                    source={{ uri: getBestImageUrl(playlist.image) }}
-                    style={styles.playlistCover}
-                    contentFit="cover"
-                  />
-                  <Text style={styles.playlistName} numberOfLines={2}>
-                    {playlist.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </>
-        )}
-      </ScrollView>
+          {!isLoading && !hasResults && (
+            <View style={styles.empty}>
+              <Ionicons name="search-outline" size={48} color={Colors.inactive} />
+              <Text style={styles.emptyText}>No results found</Text>
+            </View>
+          )}
+
+          {!isLoading && hasResults && (
+            <FlatList
+              data={songResults}
+              keyExtractor={(item) => item.id}
+              renderItem={renderItem}
+              style={styles.scrollView}
+              contentContainerStyle={[styles.content, { paddingBottom: 160 }]}
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={Platform.OS === 'android'}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={7}
+              ListHeaderComponent={
+                playlistResults.length > 0 ? (
+                  <View>
+                    <Text style={styles.sectionTitle}>Playlists</Text>
+                    <FlatList
+                      data={playlistResults}
+                      keyExtractor={(item) => item.id}
+                      renderItem={renderPlaylist}
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.playlistScroll}
+                      initialNumToRender={4}
+                      maxToRenderPerBatch={5}
+                      windowSize={5}
+                    />
+                    <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Songs</Text>
+                  </View>
+                ) : songResults.length > 0 ? (
+                  <Text style={styles.sectionTitle}>Songs</Text>
+                ) : null
+              }
+            />
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -319,3 +356,4 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
   },
 });
+

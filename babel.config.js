@@ -1,18 +1,25 @@
 module.exports = function (api) {
   api.cache(true);
   return {
-    presets: [
+    presets: ["babel-preset-expo"],
+    plugins: [
       [
-        "babel-preset-expo",
+        "module-resolver",
         {
-          unstable_transformImportMeta: true,
+          root: ["./"],
+          alias: {
+            "@": "./",
+            "@shared": "./shared"
+          },
+          extensions: [
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+            ".json"
+          ]
         }
       ]
-    ],
-    env: {
-      production: {
-        plugins: ["transform-remove-console"],
-      },
-    },
+    ]
   };
 };

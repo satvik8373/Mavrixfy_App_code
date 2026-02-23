@@ -3,6 +3,7 @@ import {
   View,
   Text,
   ScrollView,
+  FlatList,
   Pressable,
   StyleSheet,
   Platform,
@@ -10,6 +11,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { fetch } from "expo/fetch";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,6 +22,7 @@ import { getApiUrl } from "@/lib/query-client";
 import { getPublicPlaylists, FirestorePlaylist, firestorePlaylistToLocalSongs } from "@/lib/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { ProfileDropdown } from "@/components/ProfileDropdown";
+import { useScreenTracking } from "@/hooks/useScreenTracking";
 
 interface JioSaavnPlaylistResult {
   id: string;
@@ -35,19 +38,26 @@ interface CategoryData {
 }
 
 const CATEGORIES: { title: string; query: string }[] = [
-  { title: "Trending Now", query: "trending now 2026" },
-  { title: "Bollywood", query: "bollywood hits" },
-  { title: "Romantic", query: "romantic songs" },
-  { title: "Punjabi", query: "punjabi hits" },
-  { title: "Party", query: "party songs 2026" },
-  { title: "Workout", query: "workout songs 2026" },
-  { title: "Devotional", query: "devotional songs 2026" },
-  { title: "Retro Hits", query: "90s hits" },
-  { title: "Regional", query: "tamil hits 2026" },
-  { title: "International", query: "english songs 2026" },
+  { title: "Trending Now", query: "top 50" },
+  { title: "Bollywood Hits", query: "bollywood" },
+  { title: "Romantic", query: "romantic" },
+  { title: "Punjabi", query: "punjabi" },
+  { title: "Party Anthems", query: "party" },
+  { title: "Workout", query: "workout" },
+  { title: "Devotional", query: "devotional" },
+  { title: "90s Retro", query: "90s" },
+  { title: "Tamil Hits", query: "tamil" },
+  { title: "English Pop", query: "english" },
+  { title: "Chill Vibes", query: "chill" },
+  { title: "Sad Songs", query: "sad" },
+  { title: "Hip Hop", query: "hip hop" },
+  { title: "Rock", query: "rock" },
+  { title: "Classical", query: "classical" },
 ];
 
 export default function HomeScreen() {
+  useScreenTracking("Home");
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
@@ -77,8 +87,8 @@ export default function HomeScreen() {
       const loadRecent = async () => {
         try {
           const recent = await getRecentlyPlayed();
-          setRecentlyPlayed(recent.slice(0, 10));
-        } catch {}
+          setRecentlyPlayed(recent.slice(0, 6)); // Show only 6 recent items
+        } catch { }
       };
       loadRecent();
     }, [])
@@ -86,60 +96,392 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const loadData = async () => {
-      console.log("🔍 Starting data load...");
-      
-      // Load Firebase playlists
       try {
-        console.log("📦 Fetching public playlists from Firebase...");
-        const playlists = await getPublicPlaylists(15);
-        console.log(`✅ Loaded ${playlists.length} public playlists`);
+        const playlists = await getPublicPlaylists(20);
         setPublicPlaylists(playlists);
       } catch (error) {
-        console.error("❌ Error loading public playlists:", error);
+        // Silent fail
       }
 
-      // Load JioSaavn data
       try {
         const apiUrl = getApiUrl();
-        console.log("🎵 API URL:", apiUrl);
-        console.log("📦 Fetching JioSaavn playlists...");
-        
+
         const results = await Promise.all(
-          CATEGORIES.map(async (cat) => {
+          CATEGORIES.map(async (cat, index) => {
             try {
-              const url = `${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(cat.query)}&limit=10`;
-              console.log(`🔍 Fetching ${cat.title}:`, url);
-              
-              const res = await fetch(url);
-              console.log(`📡 ${cat.title} response status:`, res.status);
-              
-              const json = await res.json();
-              
-              if (json.success && json.data?.results) {
-                console.log(`✅ ${cat.title}: ${json.data.results.length} playlists`);
-                return { ...cat, results: json.data.results };
+              await new Promise(resolve => setTimeout(resolve, index * 50));
+
+              const url = `${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(cat.query)}&limit=20`;
+
+              const res = await fetch(url, {
+                headers: {
+                  'Accept': 'application/json',
+                },
+              });
+
+              if (!res.ok) {
+                return { ...cat, results: [] };
               }
-              console.log(`⚠️ ${cat.title}: No results`);
-              return { ...cat, results: [] };
+
+              const json = await res.json();
+
+              let results = [];
+              if (json.success && json.data?.results) {
+                results = json.data.results;
+              } else if (json.data?.results) {
+                results = json.data.results;
+              } else if (Array.isArray(json.results)) {
+                results = json.results;
+              }
+
+              const validPlaylists = results.filter((playlist: JioSaavnPlaylistResult) => {
+                return playlist.songCount && playlist.songCount > 0;
+              });
+
+              return { ...cat, results: validPlaylists };
             } catch (error) {
-              console.error(`❌ Error fetching ${cat.title}:`, error);
               return { ...cat, results: [] };
             }
           })
         );
-        setCategories(results);
-        console.log("✅ All categories loaded");
+
+        const validCategories = results.filter(cat => cat.results.length >= 5);
+        setCategories(validCategories);
       } catch (error) {
-        console.error("❌ Error loading JioSaavn data:", error);
+        // Silent fail
       }
 
       setLoading(false);
-      console.log("✅ Data load complete");
     };
 
     loadData();
   }, []);
 
+  // Use memoization for heavy filter calculations to prevent re-running on every render
+  // IMPORTANT: These must be called before any conditional returns to follow Rules of Hooks
+  const featuredPlaylists = React.useMemo(() => {
+    return categories
+      .filter((cat) => cat.results.length > 0)
+      .slice(0, 7)
+      .map((cat) => ({
+        id: cat.results[0].id,
+        name: cat.results[0].name,
+        imageUrl: getBestImageUrl(cat.results[0].image),
+        type: "jiosaavn" as const,
+      }));
+  }, [categories]);
+
+  const biggestHits = React.useMemo(() => {
+    return categories.find((cat) => cat.results.length >= 8)?.results.slice(0, 8) ||
+      categories.find((cat) => cat.results.length > 0)?.results || [];
+  }, [categories]);
+
+  // Section data structure for the main vertical FlatList to enable complete virtualization
+  const sections = React.useMemo(() => {
+    const data = [];
+
+    // 1. Featured Grid (Liked Songs + first 5 featured playlists to fit 2 columns nicely)
+    data.push({ id: 'featured', type: 'featured' });
+
+    // 2. Public Playlists
+    if (publicPlaylists.length > 0) {
+      data.push({ id: 'public-playlists', type: 'public-playlists' });
+    }
+
+    // 3. Biggest Hits
+    if (biggestHits.length >= 5) {
+      data.push({ id: 'biggest-hits', type: 'biggest-hits' });
+    }
+
+    // 4. Recents
+    if (recentlyPlayed.length > 0) {
+      data.push({ id: 'recents', type: 'recents' });
+    }
+
+    // 5. Other Categories
+    const otherCategories = categories.slice(1).filter(cat => cat.results.length >= 5);
+    otherCategories.forEach((cat) => {
+      data.push({ id: `category-${cat.title}`, type: 'category', data: cat });
+    });
+
+    return data;
+  }, [categories, publicPlaylists, biggestHits, recentlyPlayed]);
+
+  // Render horizontal items functions - must be before conditional returns
+  const renderPublicPlaylist = useCallback(({ item: playlist }: { item: any }) => (
+    <Pressable
+      style={({ pressed }) => [styles.playlistCard, pressed && styles.cardPressed]}
+      onPress={() =>
+        router.push({
+          pathname: "/playlist/[id]",
+          params: { id: playlist.id, firestore: "true" },
+        })
+      }
+    >
+      <Image
+        source={{ uri: playlist.imageUrl || undefined }}
+        style={styles.playlistImage}
+        contentFit="cover"
+        transition={200}
+      />
+      <Text style={styles.playlistName} numberOfLines={1}>{playlist.name}</Text>
+      <Text style={styles.playlistCreator} numberOfLines={1}>
+        By {playlist.createdBy?.fullName || "Unknown"}
+      </Text>
+    </Pressable>
+  ), []);
+
+  const renderBigHit = useCallback(({ item: playlist }: { item: any }) => (
+    <Pressable
+      style={({ pressed }) => [styles.bigHitCard, pressed && styles.cardPressed]}
+      onPress={() =>
+        router.push({
+          pathname: "/playlist/[id]",
+          params: { id: playlist.id, jiosaavn: "true" },
+        })
+      }
+    >
+      <Image
+        source={{ uri: getBestImageUrl(playlist.image) }}
+        style={styles.bigHitImage}
+        contentFit="cover"
+        transition={200}
+      />
+      <Text style={styles.bigHitName} numberOfLines={2}>{playlist.name}</Text>
+    </Pressable>
+  ), []);
+
+  const renderRecent = useCallback(({ item }: { item: any }) => (
+    <Pressable
+      style={({ pressed }) => [styles.recentCard, pressed && styles.cardPressed]}
+      onPress={() => {
+        if (item.type === "jiosaavn-playlist") {
+          router.push({
+            pathname: "/playlist/[id]",
+            params: { id: item.id, jiosaavn: "true" },
+          });
+        } else if (item.type === "playlist") {
+          router.push({
+            pathname: "/playlist/[id]",
+            params: { id: item.id },
+          });
+        }
+      }}
+    >
+      <Image
+        source={{ uri: item.imageUrl }}
+        style={styles.recentImage}
+        contentFit="cover"
+        transition={200}
+      />
+    </Pressable>
+  ), []);
+
+  const renderCategoryPlaylist = useCallback(({ item: playlist }: { item: any }) => (
+    <Pressable
+      style={({ pressed }) => [styles.playlistCard, pressed && styles.cardPressed]}
+      onPress={() =>
+        router.push({
+          pathname: "/playlist/[id]",
+          params: { id: playlist.id, jiosaavn: "true" },
+        })
+      }
+    >
+      <Image
+        source={{ uri: getBestImageUrl(playlist.image) }}
+        style={styles.playlistImage}
+        contentFit="cover"
+        transition={200}
+      />
+      <Text style={styles.playlistName} numberOfLines={1}>{playlist.name}</Text>
+    </Pressable>
+  ), []);
+
+  // Use ListHeaderComponent for Header to avoid it scrolling separately
+  const renderHeader = useCallback(() => (
+    <View style={styles.header}>
+      <View style={styles.headerTop}>
+        <Pressable onPress={() => setShowProfileDropdown(true)}>
+          {isAuthenticated && user?.picture ? (
+            <Image
+              source={{ uri: user.picture }}
+              style={styles.avatarImage}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Ionicons name="person" size={16} color={Colors.black} />
+            </View>
+          )}
+        </Pressable>
+
+        <View style={styles.filterPills}>
+          <Pressable
+            style={[styles.pill, selectedFilter === "all" && styles.pillActive]}
+            onPress={() => setSelectedFilter("all")}
+          >
+            <Text style={[styles.pillText, selectedFilter === "all" && styles.pillTextActive]}>
+              All
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.pill, selectedFilter === "music" && styles.pillActive]}
+            onPress={() => setSelectedFilter("music")}
+          >
+            <Text style={[styles.pillText, selectedFilter === "music" && styles.pillTextActive]}>
+              Music
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.pill, selectedFilter === "podcasts" && styles.pillActive]}
+            onPress={() => setSelectedFilter("podcasts")}
+          >
+            <Text style={[styles.pillText, selectedFilter === "podcasts" && styles.pillTextActive]}>
+              Podcasts
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  ), [isAuthenticated, user?.picture, selectedFilter]);
+
+  const renderSection = useCallback(({ item: section }: { item: any }) => {
+    switch (section.type) {
+      case 'featured':
+        // Safe slice to Ensure even grid 
+        const gridPlaylists = featuredPlaylists.slice(0, 5);
+        return (
+          <View style={styles.featuredGrid}>
+            <Pressable
+              style={({ pressed }) => [styles.featuredCard, styles.likedSongsCard, pressed && styles.cardPressed]}
+              onPress={() => router.push("/(tabs)/liked-songs")}
+            >
+              <View style={styles.likedSongsIcon}>
+                <Ionicons name="heart" size={24} color={Colors.text} />
+              </View>
+              <Text style={styles.featuredCardTitle}>Liked Songs</Text>
+              <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} style={styles.featuredCardMenu} />
+            </Pressable>
+
+            {gridPlaylists.map((playlist) => (
+              <Pressable
+                key={playlist.id}
+                style={({ pressed }) => [styles.featuredCard, pressed && styles.cardPressed]}
+                onPress={() =>
+                  router.push({
+                    pathname: "/playlist/[id]",
+                    params: { id: playlist.id, [playlist.type]: "true" },
+                  })
+                }
+              >
+                <Image
+                  source={{ uri: playlist.imageUrl }}
+                  style={styles.featuredCardImage}
+                  contentFit="cover"
+                />
+                <Text style={styles.featuredCardTitle} numberOfLines={2}>
+                  {playlist.name}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        );
+
+      case 'public-playlists':
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Public Playlists</Text>
+            <FlatList
+              data={publicPlaylists}
+              renderItem={renderPublicPlaylist}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              initialNumToRender={3}
+              maxToRenderPerBatch={4}
+              windowSize={5}
+            />
+          </View>
+        );
+
+      case 'biggest-hits':
+        return (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Today's biggest hits</Text>
+              <Pressable>
+                <Text style={styles.showAllText}>Show all</Text>
+              </Pressable>
+            </View>
+            <FlatList
+              data={biggestHits.slice(0, 10)}
+              renderItem={renderBigHit}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              initialNumToRender={3}
+              maxToRenderPerBatch={4}
+              windowSize={5}
+              decelerationRate="fast"
+              snapToInterval={176} // 160 width + 16 margin
+            />
+          </View>
+        );
+
+      case 'recents':
+        return (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recents</Text>
+              <Pressable>
+                <Text style={styles.showAllText}>Show all</Text>
+              </Pressable>
+            </View>
+            <FlatList
+              data={recentlyPlayed}
+              renderItem={renderRecent}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              initialNumToRender={3}
+              maxToRenderPerBatch={4}
+              windowSize={5}
+            />
+          </View>
+        );
+
+      case 'category':
+        return (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{section.data.title}</Text>
+              <Pressable>
+                <Text style={styles.showAllText}>Show all</Text>
+              </Pressable>
+            </View>
+            <FlatList
+              data={section.data.results.slice(0, 15)}
+              renderItem={renderCategoryPlaylist}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              initialNumToRender={4}
+              maxToRenderPerBatch={5}
+              windowSize={5}
+            />
+          </View>
+        );
+
+      default:
+        return null;
+    }
+  }, [featuredPlaylists, publicPlaylists, biggestHits, recentlyPlayed]);
+
+  // Check loading state after all hooks are defined
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingContainer, { paddingTop: topInset }]}>
@@ -148,302 +490,29 @@ export default function HomeScreen() {
     );
   }
 
-  // Get featured playlists (mix of public and JioSaavn)
-  const featuredPlaylists = [
-    ...publicPlaylists.slice(0, 3).map(p => ({
-      id: p.id,
-      name: p.name,
-      imageUrl: p.imageUrl,
-      type: "firestore" as const,
-    })),
-    ...categories.flatMap(cat => 
-      cat.results.slice(0, 2).map(p => ({
-        id: p.id,
-        name: p.name,
-        imageUrl: getBestImageUrl(p.image),
-        type: "jiosaavn" as const,
-      }))
-    ),
-  ].slice(0, 6);
-
-  // Get "Today's biggest hits" - first category with results
-  const biggestHits = categories.find(cat => cat.results.length > 0)?.results.slice(0, 5) || [];
-
   return (
-    <View style={[styles.container, { paddingTop: topInset }]}>
-      <ScrollView
+    <LinearGradient
+      colors={["#0a0a0a", "#121212", "#1a1a1a"]}
+      style={[styles.container, { paddingTop: topInset }]}
+    >
+      <FlatList
+        data={sections}
+        renderItem={renderSection}
+        keyExtractor={(item) => item.id}
+        ListHeaderComponent={renderHeader}
         style={styles.scrollView}
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
-      >
-        {/* Header with Avatar and Filters */}
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            {/* Profile Avatar */}
-            <Pressable onPress={() => setShowProfileDropdown(true)}>
-              {isAuthenticated && user?.picture ? (
-                <Image
-                  source={{ uri: user.picture }}
-                  style={styles.avatarImage}
-                  contentFit="cover"
-                />
-              ) : (
-                <View style={styles.avatar}>
-                  <Ionicons name="person" size={16} color={Colors.black} />
-                </View>
-              )}
-            </Pressable>
-            
-            <View style={styles.filterPills}>
-              <Pressable
-                style={[styles.pill, selectedFilter === "all" && styles.pillActive]}
-                onPress={() => setSelectedFilter("all")}
-              >
-                <Text style={[styles.pillText, selectedFilter === "all" && styles.pillTextActive]}>
-                  All
-                </Text>
-              </Pressable>
-              
-              <Pressable
-                style={[styles.pill, selectedFilter === "music" && styles.pillActive]}
-                onPress={() => setSelectedFilter("music")}
-              >
-                <Text style={[styles.pillText, selectedFilter === "music" && styles.pillTextActive]}>
-                  Music
-                </Text>
-              </Pressable>
-              
-              <Pressable
-                style={[styles.pill, selectedFilter === "podcasts" && styles.pillActive]}
-                onPress={() => setSelectedFilter("podcasts")}
-              >
-                <Text style={[styles.pillText, selectedFilter === "podcasts" && styles.pillTextActive]}>
-                  Podcasts
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-
-        {/* Profile Dropdown */}
-        <ProfileDropdown
-          visible={showProfileDropdown}
-          onClose={() => setShowProfileDropdown(false)}
-        />
-
-        {/* Featured Grid (2 columns) */}
-        <View style={styles.featuredGrid}>
-          {/* Liked Songs Card */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.featuredCard,
-              styles.likedSongsCard,
-              pressed && styles.cardPressed,
-            ]}
-            onPress={() => router.push("/liked-songs")}
-          >
-            <View style={styles.likedSongsIcon}>
-              <Ionicons name="heart" size={24} color={Colors.text} />
-            </View>
-            <Text style={styles.featuredCardTitle}>Liked Songs</Text>
-            <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} style={styles.featuredCardMenu} />
-          </Pressable>
-
-          {/* Featured Playlists */}
-          {featuredPlaylists.map((playlist) => (
-            <Pressable
-              key={playlist.id}
-              style={({ pressed }) => [
-                styles.featuredCard,
-                pressed && styles.cardPressed,
-              ]}
-              onPress={() =>
-                router.push({
-                  pathname: "/playlist/[id]",
-                  params: { 
-                    id: playlist.id, 
-                    [playlist.type]: "true" 
-                  },
-                })
-              }
-            >
-              <Image
-                source={{ uri: playlist.imageUrl }}
-                style={styles.featuredCardImage}
-                contentFit="cover"
-              />
-              <Text style={styles.featuredCardTitle} numberOfLines={2}>
-                {playlist.name}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {/* Today's Biggest Hits */}
-        {biggestHits.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Today's biggest hits</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-              decelerationRate="fast"
-              snapToInterval={180}
-            >
-              {biggestHits.map((playlist) => (
-                <Pressable
-                  key={playlist.id}
-                  style={({ pressed }) => [
-                    styles.bigHitCard,
-                    pressed && styles.cardPressed,
-                  ]}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/playlist/[id]",
-                      params: { id: playlist.id, jiosaavn: "true" },
-                    })
-                  }
-                >
-                  <Image
-                    source={{ uri: getBestImageUrl(playlist.image) }}
-                    style={styles.bigHitImage}
-                    contentFit="cover"
-                  />
-                  <Text style={styles.bigHitName} numberOfLines={2}>
-                    {playlist.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Recents */}
-        {recentlyPlayed.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recents</Text>
-              <Pressable onPress={() => {}}>
-                <Text style={styles.showAllText}>Show all</Text>
-              </Pressable>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-            >
-              {recentlyPlayed.map((item) => (
-                <Pressable
-                  key={item.id}
-                  style={({ pressed }) => [
-                    styles.recentCard,
-                    pressed && styles.cardPressed,
-                  ]}
-                  onPress={() => {
-                    if (item.type === "jiosaavn-playlist") {
-                      router.push({
-                        pathname: "/playlist/[id]",
-                        params: { id: item.id, jiosaavn: "true" },
-                      });
-                    } else if (item.type === "playlist") {
-                      router.push({
-                        pathname: "/playlist/[id]",
-                        params: { id: item.id },
-                      });
-                    }
-                  }}
-                >
-                  <Image
-                    source={{ uri: item.imageUrl }}
-                    style={styles.recentImage}
-                    contentFit="cover"
-                  />
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Other Categories */}
-        {categories.slice(1).map((cat) =>
-          cat.results.length > 0 ? (
-            <View key={cat.title} style={styles.section}>
-              <Text style={styles.sectionTitle}>{cat.title}</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.horizontalList}
-              >
-                {cat.results.map((playlist) => (
-                  <Pressable
-                    key={playlist.id}
-                    style={({ pressed }) => [
-                      styles.playlistCard,
-                      pressed && styles.cardPressed,
-                    ]}
-                    onPress={() =>
-                      router.push({
-                        pathname: "/playlist/[id]",
-                        params: { id: playlist.id, jiosaavn: "true" },
-                      })
-                    }
-                  >
-                    <Image
-                      source={{ uri: getBestImageUrl(playlist.image) }}
-                      style={styles.playlistImage}
-                      contentFit="cover"
-                    />
-                    <Text style={styles.playlistName} numberOfLines={1}>
-                      {playlist.name}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
-          ) : null
-        )}
-
-        {/* Community Playlists */}
-        {publicPlaylists.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Community Playlists</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-            >
-              {publicPlaylists.slice(3).map((playlist) => (
-                <Pressable
-                  key={playlist.id}
-                  style={({ pressed }) => [
-                    styles.playlistCard,
-                    pressed && styles.cardPressed,
-                  ]}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/playlist/[id]",
-                      params: { id: playlist.id, firestore: "true" },
-                    })
-                  }
-                >
-                  <Image
-                    source={{ uri: playlist.imageUrl || undefined }}
-                    style={styles.playlistImage}
-                    contentFit="cover"
-                  />
-                  <Text style={styles.playlistName} numberOfLines={1}>
-                    {playlist.name}
-                  </Text>
-                  <Text style={styles.playlistCreator} numberOfLines={1}>
-                    By {playlist.createdBy?.fullName || "Unknown"}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-      </ScrollView>
-    </View>
+        initialNumToRender={3}
+        maxToRenderPerBatch={3}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS === 'android'}
+      />
+      <ProfileDropdown
+        visible={showProfileDropdown}
+        onClose={() => setShowProfileDropdown(false)}
+      />
+    </LinearGradient>
   );
 }
 
@@ -512,34 +581,40 @@ const styles = StyleSheet.create({
   },
   featuredCard: {
     width: "48%" as any,
-    height: 60,
+    height: 64,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.07)",
-    borderRadius: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderRadius: 6,
     overflow: "hidden",
     position: "relative",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
   },
   likedSongsCard: {
-    backgroundColor: "rgba(80, 56, 160, 0.5)",
+    backgroundColor: "#5038a0",
   },
   likedSongsIcon: {
-    width: 60,
-    height: 60,
-    backgroundColor: "rgba(80, 56, 160, 1)",
+    width: 64,
+    height: 64,
+    backgroundColor: "#5038a0",
     justifyContent: "center",
     alignItems: "center",
   },
   featuredCardImage: {
-    width: 60,
-    height: 60,
+    width: 64,
+    height: 64,
   },
   featuredCardTitle: {
     flex: 1,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
     color: Colors.text,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
+    letterSpacing: -0.2,
   },
   featuredCardMenu: {
     position: "absolute",
@@ -577,51 +652,68 @@ const styles = StyleSheet.create({
   },
   bigHitCard: {
     width: 160,
-    marginRight: 12,
+    marginRight: 16,
   },
   bigHitImage: {
     width: 160,
     height: 160,
     borderRadius: 8,
     backgroundColor: Colors.surfaceLight,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
   },
   bigHitName: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    color: Colors.subtext,
-    marginTop: 8,
-    lineHeight: 16,
-  },
-  recentCard: {
-    width: 120,
-    marginRight: 12,
-  },
-  recentImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
-    backgroundColor: Colors.surfaceLight,
-  },
-  playlistCard: {
-    width: 140,
-    marginRight: 12,
-  },
-  playlistImage: {
-    width: 140,
-    height: 140,
-    borderRadius: 8,
-    backgroundColor: Colors.surfaceLight,
-  },
-  playlistName: {
     fontSize: 13,
     fontFamily: "Inter_500Medium",
     color: Colors.text,
-    marginTop: 6,
+    marginTop: 8,
+    lineHeight: 18,
+    letterSpacing: -0.2,
+  },
+  recentCard: {
+    width: 160,
+    marginRight: 16,
+  },
+  recentImage: {
+    width: 160,
+    height: 160,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceLight,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  playlistCard: {
+    width: 160,
+    marginRight: 16,
+  },
+  playlistImage: {
+    width: 160,
+    height: 160,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceLight,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  playlistName: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+    marginTop: 8,
+    letterSpacing: -0.2,
   },
   playlistCreator: {
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: "Inter_400Regular",
     color: Colors.subtext,
-    marginTop: 2,
+    marginTop: 4,
   },
 });

@@ -1,0 +1,46 @@
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
+index b2409a0..40aa052 100644
+--- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
+@@ -340,7 +340,7 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
+             } else {
+                 val context: ReactContext = context
+                 val track = musicService.tracks[index]
+-                track.setMetadata(context, Arguments.toBundle(map), musicService.ratingType)
++                track.setMetadata(context, Arguments.toBundle(map) ?: Bundle(), musicService.ratingType)
+                 musicService.updateMetadataForTrack(index, track)
+ 
+                 callback.resolve(null)
+@@ -355,7 +355,7 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
+             callback.reject("no_current_item", "There is no current item in the player")
+ 
+         val context: ReactContext = context
+-        Arguments.toBundle(map)?.let {
++        (Arguments.toBundle(map) ?: Bundle()).let {
+             val track = bundleToTrack(it)
+             musicService.updateNowPlayingMetadata(track)
+         }
+@@ -545,7 +545,8 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
+         if (verifyServiceBoundOrReject(callback)) return@launch
+ 
+         if (index >= 0 && index < musicService.tracks.size) {
+-            callback.resolve(Arguments.fromBundle(musicService.tracks[index].originalItem))
++            val item = musicService.tracks[index].originalItem
++            callback.resolve(if (item != null) Arguments.fromBundle(item) else null)
+         } else {
+             callback.resolve(null)
+         }
+@@ -584,9 +585,10 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
+         if (verifyServiceBoundOrReject(callback)) return@launch
+         callback.resolve(
+             if (musicService.tracks.isEmpty()) null
+-            else Arguments.fromBundle(
+-                musicService.tracks[musicService.getCurrentTrackIndex()].originalItem
+-            )
++            else {
++                val item = musicService.tracks[musicService.getCurrentTrackIndex()].originalItem
++                if (item != null) Arguments.fromBundle(item) else null
++            }
+         )
+     }
+ 

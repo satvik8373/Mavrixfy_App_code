@@ -9,6 +9,10 @@ const KEYS = {
   SETTINGS: "@mavrixfy_settings",
 } as const;
 
+// Memory cache for frequently accessed data
+const memoryCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 30000; // 30 seconds
+
 export interface RecentlyPlayedItem {
   id: string;
   name: string;
@@ -72,8 +76,19 @@ export const EQUALIZER_PRESETS: Record<string, Record<string, number>> = {
 
 async function getJSON<T>(key: string, fallback: T): Promise<T> {
   try {
+    // Check memory cache first
+    const cached = memoryCache.get(key);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.data;
+    }
+
     const data = await AsyncStorage.getItem(key);
-    return data ? JSON.parse(data) : fallback;
+    const parsed = data ? JSON.parse(data) : fallback;
+    
+    // Store in memory cache
+    memoryCache.set(key, { data: parsed, timestamp: Date.now() });
+    
+    return parsed;
   } catch {
     return fallback;
   }
@@ -81,6 +96,10 @@ async function getJSON<T>(key: string, fallback: T): Promise<T> {
 
 async function setJSON(key: string, value: unknown): Promise<void> {
   try {
+    // Update memory cache immediately
+    memoryCache.set(key, { data: value, timestamp: Date.now() });
+    
+    // Persist to AsyncStorage
     await AsyncStorage.setItem(key, JSON.stringify(value));
   } catch {}
 }

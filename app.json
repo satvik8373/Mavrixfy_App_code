@@ -2,12 +2,12 @@
   "expo": {
     "name": "Mavrixfy",
     "slug": "mavrixfy",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mavrixfy",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
@@ -16,10 +16,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "UIBackgroundModes": [
-          "audio",
           "audio"
         ],
         "NSMicrophoneUsageDescription": "This app may use the microphone for voice features.",
@@ -31,11 +30,11 @@
     },
     "android": {
       "package": "com.mavrixfy.app",
-      "versionCode": 1,
+      "versionCode": 5,
       "adaptiveIcon": {
-        "backgroundColor": "#121212",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
+        "backgroundColor": "#121212",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "permissions": [
@@ -44,12 +43,10 @@
         "WAKE_LOCK",
         "FOREGROUND_SERVICE"
       ],
-      "usesCleartextTraffic": true,
-      "allowBackup": true,
-      "softwareKeyboardLayoutMode": "pan",
-      "jsEngine": "hermes",
-      "enableProguardInReleaseBuilds": true,
-      "enableShrinkResourcesInReleaseBuilds": true
+      "enableDangerousExperimentalLeanBuilds": true,
+      "navigationBar": {
+        "backgroundColor": "#000000"
+      }
     },
     "plugins": [
       [
@@ -59,25 +56,71 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-system-ui",
+      [
+        "expo-updates",
+        {
+          "username": "satvik1234"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "targetSdkVersion": 35,
+            "compileSdkVersion": 35,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "enableProguardInReleaseBuilds": true,
+            "extraProguardRules": "-keep class com.facebook.hermes.unicode.** { *; }\n-keep class com.facebook.jni.** { *; }\n-keep class com.doublesymmetry.** { *; }\n-keep class expo.modules.updates.** { *; }\n-keep class kotlin.** { *; }\n-keep class kotlin.reflect.** { *; }",
+            "useLegacyPackaging": false,
+            "packagingOptions": {
+              "pickFirst": [
+                "**/libc++_shared.so"
+              ],
+              "exclude": [
+                "META-INF/*.kotlin_module"
+              ]
+            },
+            "enableMinifyInReleaseBuilds": true,
+            "usesCleartextTraffic": false
+          }
+        }
+      ]
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": true
     },
+    "web": {
+      "bundler": "metro"
+    },
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "updates": {
+      "url": "https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": "1.1.0",
     "extra": {
       "router": {
         "origin": "https://replit.com/"
       },
+      "domain": "spotify-api-drab.vercel.app",
+      "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
+      "firebaseAuthDomain": "spotify-8fefc.firebaseapp.com",
+      "firebaseProjectId": "spotify-8fefc",
+      "firebaseStorageBucket": "spotify-8fefc.firebasestorage.app",
+      "firebaseMessagingSenderId": "816396705670",
+      "firebaseAppId": "1:816396705670:web:005e724df7139772521607",
+      "firebaseMeasurementId": "G-FQJS8LREP5",
       "eas": {
-        "projectId": "e96c8402-ab0a-4e8f-ae9f-c3ab42c7691c"
+        "projectId": "93293119-93b7-4dbb-acdd-7241771254c4"
       }
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/e96c8402-ab0a-4e8f-ae9f-c3ab42c7691c"
-    }
+    "owner": "satvik1234"
   }
 }

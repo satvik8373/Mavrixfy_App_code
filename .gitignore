@@ -39,3 +39,17 @@ yarn-error.*
 .vercel
 
 .env
+
+# Temporary files
+attached_assets/
+*.tmp
+*.log
+
+# Documentation (keep only essential)
+*_DEBUG.md
+*_FIX.md
+*_GUIDE.md
+*_INSTRUCTIONS.md
+*_STATUS.md
+BUILD_*.md
+FIX_*.md

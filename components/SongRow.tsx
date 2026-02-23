@@ -1,4 +1,4 @@
-import React from "react";
+import React, { memo } from "react";
 import { View, Text, Pressable, StyleSheet, Platform, Alert } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,8 +15,13 @@ interface Props {
   onRemove?: () => void;
 }
 
-export default function SongRow({ song, index, queue, showCover = true, onRemove }: Props) {
+const SongRow = memo(function SongRow({ song, index, queue, showCover = true, onRemove }: Props) {
   const { playSong, currentSong, isPlaying, toggleLike, isLiked, addToQueue, playNext } = usePlayer();
+
+  // Safety check for song data
+  if (!song || !song.id || !song.title) {
+    return null;
+  }
 
   const isActive = currentSong?.id === song.id;
   const liked = isLiked(song.id);
@@ -60,20 +65,30 @@ export default function SongRow({ song, index, queue, showCover = true, onRemove
           )}
         </Text>
       )}
-      {showCover && (
-        <Image source={{ uri: song.coverUrl }} style={styles.cover} contentFit="cover" />
+      {showCover && song.coverUrl && (
+        <Image 
+          source={{ uri: song.coverUrl }} 
+          style={styles.cover} 
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          priority="normal"
+          recyclingKey={song.id}
+        />
       )}
       <View style={styles.info}>
         <Text style={[styles.title, isActive && styles.activeText]} numberOfLines={1}>
-          {song.title}
+          {song.title || "Unknown Title"}
         </Text>
-        <Text style={styles.artist} numberOfLines={1}>{song.artist}</Text>
+        <Text style={styles.artist} numberOfLines={1}>
+          {song.artist || "Unknown Artist"}
+        </Text>
       </View>
       <Pressable onPress={handleLike} hitSlop={10} style={styles.likeBtn}>
         <Ionicons
           name={liked ? "heart" : "heart-outline"}
-          size={20}
-          color={liked ? Colors.primary : Colors.subtext}
+          size={22}
+          color={liked ? "#1DB954" : Colors.subtext}
+          style={liked && { textShadowColor: 'rgba(29, 185, 84, 0.5)', textShadowRadius: 4 }}
         />
       </Pressable>
       {onRemove ? (
@@ -85,7 +100,17 @@ export default function SongRow({ song, index, queue, showCover = true, onRemove
       )}
     </Pressable>
   );
-}
+}, (prevProps, nextProps) => {
+  // Custom comparison for better performance
+  return (
+    prevProps.song.id === nextProps.song.id &&
+    prevProps.index === nextProps.index &&
+    prevProps.showCover === nextProps.showCover &&
+    prevProps.queue?.length === nextProps.queue?.length
+  );
+});
+
+export default SongRow;
 
 const styles = StyleSheet.create({
   container: {

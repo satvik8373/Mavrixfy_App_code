@@ -10,6 +10,8 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Alert,
+  Image,
+  Dimensions,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,6 +24,8 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { getAuthApiUrl } from "@/lib/api-config";
 
+const { width, height } = Dimensions.get("window");
+
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -29,7 +33,7 @@ export default function LoginScreen() {
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
 
-  const [isLogin, setIsLogin] = useState(true);
+  const [showSignupForm, setShowSignupForm] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -42,21 +46,21 @@ export default function LoginScreen() {
       Alert.alert("Error", "Please fill in all fields");
       return;
     }
-    if (!isLogin && !fullName.trim()) {
+    if (showSignupForm && !fullName.trim()) {
       Alert.alert("Error", "Please enter your full name");
       return;
     }
-    if (!isLogin && password.length < 6) {
+    if (showSignupForm && password.length < 6) {
       Alert.alert("Error", "Password must be at least 6 characters");
       return;
     }
 
     setLoading(true);
     try {
-      if (isLogin) {
-        await login(email.trim(), password);
-      } else {
+      if (showSignupForm) {
         await register(email.trim(), password, fullName.trim());
+      } else {
+        await login(email.trim(), password);
       }
       if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)");
@@ -64,9 +68,9 @@ export default function LoginScreen() {
       const msg = error.message || "Something went wrong";
       const friendlyMsg = msg.includes("user-not-found") ? "No account found with this email"
         : msg.includes("wrong-password") || msg.includes("invalid-credential") ? "Incorrect password"
-        : msg.includes("email-already-in-use") ? "An account with this email already exists"
-        : msg.includes("invalid-email") ? "Please enter a valid email address"
-        : msg;
+          : msg.includes("email-already-in-use") ? "An account with this email already exists"
+            : msg.includes("invalid-email") ? "Please enter a valid email address"
+              : msg;
       Alert.alert("Error", friendlyMsg);
     } finally {
       setLoading(false);
@@ -105,17 +109,18 @@ export default function LoginScreen() {
 
       if (result.type === "success" && result.url) {
         console.log("✅ Success! Redirect URL:", result.url);
-        
+
         const parsedUrl = Linking.parse(result.url);
         console.log("Parsed URL:", JSON.stringify(parsedUrl, null, 2));
         console.log("Query params:", JSON.stringify(parsedUrl.queryParams, null, 2));
-        
-        const idToken = parsedUrl.queryParams?.id_token as string | undefined;
+
+        const queryParams = parsedUrl.queryParams as Record<string, string | undefined> | undefined;
+        const idToken = queryParams?.id_token;
 
         if (idToken) {
           console.log("✅ Got ID token, length:", idToken.length);
           await signInWithGoogleCredential(idToken);
-          if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          if (Platform.OS !== ("web" as string)) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           router.replace("/(tabs)");
         } else {
           console.log("❌ No ID token in URL");
@@ -139,7 +144,7 @@ export default function LoginScreen() {
   };
 
   const handleGuest = () => {
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS !== ("web" as string)) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     continueAsGuest();
     router.replace("/(tabs)");
   };
@@ -147,10 +152,10 @@ export default function LoginScreen() {
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       <LinearGradient
-        colors={["#1a1a2e", "#16213e", "#0f3460", Colors.background]}
-        locations={[0, 0.3, 0.6, 1]}
+        colors={["#121212", "#1a1a1a", "#0a0a0a"]}
         style={StyleSheet.absoluteFill}
       />
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -161,38 +166,178 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.logoSection}>
-            <View style={styles.logoCircle}>
-              <Ionicons name="musical-notes" size={36} color={Colors.primary} />
-            </View>
-            <Text style={styles.logoText}>Mavrixfy</Text>
-            <Text style={styles.tagline}>Your music, everywhere</Text>
-          </View>
+          {!showSignupForm ? (
+            // Main Login Screen
+            <View style={styles.mainContent}>
+              {/* Hero Section with Artist Images */}
+              <View style={styles.heroSection}>
+                <View style={styles.circleGrid}>
+                  {/* Artist/Album Images from internet */}
+                  <View style={[styles.artistCircle, { top: 10, left: 20 }]}>
+                    <Image
+                      source={{ uri: "https://i.scdn.co/image/ab67616d0000b273e787cffec20aa2a396a61647" }}
+                      style={styles.circleImage}
+                    />
+                  </View>
+                  <View style={[styles.artistCircle, { top: 20, left: 120 }]}>
+                    <Image
+                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb0c68f6c95232e716f0abee8d" }}
+                      style={styles.circleImage}
+                    />
+                  </View>
+                  <View style={[styles.artistCircle, { top: 10, right: 20 }]}>
+                    <Image
+                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb8ae7f2aaa9817a704a87ea36" }}
+                      style={styles.circleImage}
+                    />
+                  </View>
+                  <View style={[styles.artistCircle, { top: 100, left: 10 }]}>
+                    <Image
+                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb40b5c07ab77b6b1a9075fdc0" }}
+                      style={styles.circleImage}
+                    />
+                  </View>
+                  <View style={[styles.artistCircle, { top: 120, left: 140 }]}>
+                    <Image
+                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb12d5ab979779aa0c87a8c8c0" }}
+                      style={styles.circleImage}
+                    />
+                  </View>
+                  <View style={[styles.artistCircle, { top: 100, right: 30 }]}>
+                    <Image
+                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb6a224073987b930f99adc706" }}
+                      style={styles.circleImage}
+                    />
+                  </View>
+                </View>
 
-          <View style={styles.formCard}>
-            <View style={styles.tabRow}>
-              <Pressable
-                style={[styles.tab, isLogin && styles.tabActive]}
-                onPress={() => setIsLogin(true)}
-              >
-                <Text style={[styles.tabText, isLogin && styles.tabTextActive]}>Log in</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.tab, !isLogin && styles.tabActive]}
-                onPress={() => setIsLogin(false)}
-              >
-                <Text style={[styles.tabText, !isLogin && styles.tabTextActive]}>Sign up</Text>
-              </Pressable>
-            </View>
+                {/* Mavrixfy Logo */}
+                <View style={styles.logoCircle}>
+                  <Image
+                    source={require("@/assets/images/icon.png")}
+                    style={styles.logoImage}
+                    resizeMode="contain"
+                  />
+                </View>
+              </View>
 
-            {!isLogin && (
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Full Name</Text>
-                <View style={styles.inputWrap}>
-                  <Ionicons name="person-outline" size={18} color={Colors.inactive} style={styles.inputIcon} />
+              {/* Title */}
+              <View style={styles.titleSection}>
+                <Text style={styles.heroTitle}>Millions of songs.</Text>
+                <Text style={styles.heroTitle}>Free on Mavrixfy.</Text>
+              </View>
+
+              {/* Google Sign In */}
+              <Pressable
+                style={styles.googleBtn}
+                onPress={handleGoogleSignIn}
+                disabled={googleLoading}
+              >
+                {googleLoading ? (
+                  <ActivityIndicator size="small" color={Colors.black} />
+                ) : (
+                  <>
+                    <View style={styles.googleIconCircle}>
+                      <MaterialCommunityIcons name="google" size={20} color="#DB4437" />
+                    </View>
+                    <Text style={styles.googleBtnText}>Continue with Google</Text>
+                  </>
+                )}
+              </Pressable>
+
+              {/* Guest Button */}
+              <Pressable style={styles.guestBtn} onPress={handleGuest}>
+                <Text style={styles.guestBtnText}>Continue as Guest</Text>
+              </Pressable>
+
+              {/* Login Form */}
+              <View style={styles.formSection}>
+                <View style={styles.inputGroup}>
                   <TextInput
                     style={styles.input}
-                    placeholder="Enter your name"
+                    placeholder="Email address"
+                    placeholderTextColor={Colors.inactive}
+                    value={email}
+                    onChangeText={setEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    selectionColor={Colors.primary}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={[styles.input, styles.passwordInput]}
+                      placeholder="Password"
+                      placeholderTextColor={Colors.inactive}
+                      value={password}
+                      onChangeText={setPassword}
+                      secureTextEntry={!showPassword}
+                      selectionColor={Colors.primary}
+                    />
+                    <Pressable
+                      style={styles.eyeIcon}
+                      onPress={() => setShowPassword(!showPassword)}
+                      hitSlop={10}
+                    >
+                      <Ionicons
+                        name={showPassword ? "eye-off-outline" : "eye-outline"}
+                        size={20}
+                        color={Colors.inactive}
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+
+                <Pressable style={styles.forgotPassword}>
+                  <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+                </Pressable>
+
+                <Pressable
+                  style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
+                  onPress={handleSubmit}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color={Colors.black} />
+                  ) : (
+                    <Text style={styles.loginBtnText}>Log In</Text>
+                  )}
+                </Pressable>
+
+                <View style={styles.signupPrompt}>
+                  <Text style={styles.signupPromptText}>Don't have an account? </Text>
+                  <Pressable onPress={() => setShowSignupForm(true)}>
+                    <Text style={styles.signupLink}>Sign up</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          ) : (
+            // Signup Form
+            <View style={styles.signupContent}>
+              <Pressable
+                style={styles.backButton}
+                onPress={() => {
+                  setShowSignupForm(false);
+                  setEmail("");
+                  setPassword("");
+                  setFullName("");
+                }}
+              >
+                <Ionicons name="arrow-back" size={24} color={Colors.text} />
+              </Pressable>
+
+              <View style={styles.signupHeader}>
+                <Text style={styles.signupTitle}>Create your account</Text>
+              </View>
+
+              <View style={styles.signupForm}>
+                <View style={styles.inputGroup}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Full Name"
                     placeholderTextColor={Colors.inactive}
                     value={fullName}
                     onChangeText={setFullName}
@@ -200,96 +345,66 @@ export default function LoginScreen() {
                     selectionColor={Colors.primary}
                   />
                 </View>
-              </View>
-            )}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email</Text>
-              <View style={styles.inputWrap}>
-                <Ionicons name="mail-outline" size={18} color={Colors.inactive} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter your email"
-                  placeholderTextColor={Colors.inactive}
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  selectionColor={Colors.primary}
-                />
-              </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Password</Text>
-              <View style={styles.inputWrap}>
-                <Ionicons name="lock-closed-outline" size={18} color={Colors.inactive} style={styles.inputIcon} />
-                <TextInput
-                  style={[styles.input, styles.passwordInput]}
-                  placeholder="Enter your password"
-                  placeholderTextColor={Colors.inactive}
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showPassword}
-                  selectionColor={Colors.primary}
-                />
-                <Pressable onPress={() => setShowPassword(!showPassword)} hitSlop={10}>
-                  <Ionicons
-                    name={showPassword ? "eye-off-outline" : "eye-outline"}
-                    size={20}
-                    color={Colors.inactive}
+                <View style={styles.inputGroup}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Email address"
+                    placeholderTextColor={Colors.inactive}
+                    value={email}
+                    onChangeText={setEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    selectionColor={Colors.primary}
                   />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={[styles.input, styles.passwordInput]}
+                      placeholder="Password"
+                      placeholderTextColor={Colors.inactive}
+                      value={password}
+                      onChangeText={setPassword}
+                      secureTextEntry={!showPassword}
+                      selectionColor={Colors.primary}
+                    />
+                    <Pressable
+                      style={styles.eyeIcon}
+                      onPress={() => setShowPassword(!showPassword)}
+                      hitSlop={10}
+                    >
+                      <Ionicons
+                        name={showPassword ? "eye-off-outline" : "eye-outline"}
+                        size={20}
+                        color={Colors.inactive}
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+
+                <Pressable
+                  style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
+                  onPress={handleSubmit}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color={Colors.black} />
+                  ) : (
+                    <Text style={styles.loginBtnText}>Sign Up</Text>
+                  )}
                 </Pressable>
+
+                <View style={styles.signupPrompt}>
+                  <Text style={styles.signupPromptText}>Already have an account? </Text>
+                  <Pressable onPress={() => setShowSignupForm(false)}>
+                    <Text style={styles.signupLink}>Log in</Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
-
-            <Pressable
-              style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
-              onPress={handleSubmit}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color={Colors.black} />
-              ) : (
-                <Text style={styles.submitBtnText}>{isLogin ? "Log in" : "Create account"}</Text>
-              )}
-            </Pressable>
-
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            <Pressable
-              style={[styles.socialBtn, googleLoading && styles.submitBtnDisabled]}
-              onPress={handleGoogleSignIn}
-              disabled={googleLoading}
-            >
-              {googleLoading ? (
-                <ActivityIndicator size="small" color={Colors.text} />
-              ) : (
-                <MaterialCommunityIcons name="google" size={20} color={Colors.text} />
-              )}
-              <Text style={styles.socialBtnText}>
-                {googleLoading ? "Signing in..." : "Continue with Google"}
-              </Text>
-            </Pressable>
-
-            <Pressable style={styles.guestBtn} onPress={handleGuest}>
-              <Ionicons name="person-outline" size={20} color={Colors.subtext} />
-              <Text style={styles.guestBtnText}>Continue as Guest</Text>
-            </Pressable>
-
-            <View style={styles.switchRow}>
-              <Text style={styles.switchText}>
-                {isLogin ? "Don't have an account?" : "Already have an account?"}
-              </Text>
-              <Pressable onPress={() => setIsLogin(!isLogin)}>
-                <Text style={styles.switchLink}>{isLogin ? "Sign up" : "Log in"}</Text>
-              </Pressable>
-            </View>
-          </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -297,95 +412,210 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  flex: { flex: 1 },
-  scrollContent: { flexGrow: 1, paddingHorizontal: 24 },
-  logoSection: { alignItems: "center", marginTop: 40, marginBottom: 32 },
+  container: {
+    flex: 1,
+    backgroundColor: "#0a0a0a",
+  },
+  flex: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
+
+  // Main Content
+  mainContent: {
+    flex: 1,
+    paddingHorizontal: 24,
+  },
+
+  // Hero Section with Colorful Circles
+  heroSection: {
+    height: 240,
+    marginBottom: 20,
+    position: "relative",
+  },
+  circleGrid: {
+    flex: 1,
+    position: "relative",
+  },
+  artistCircle: {
+    position: "absolute",
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    overflow: "hidden",
+  },
+  circleImage: {
+    width: "100%",
+    height: "100%",
+  },
   logoCircle: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: "rgba(29,185,84,0.15)",
-    alignItems: "center", justifyContent: "center",
-    marginBottom: 16,
+    position: "absolute",
+    bottom: 20,
+    left: "50%",
+    marginLeft: -40,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.text,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    overflow: "hidden",
   },
-  logoText: {
-    fontSize: 32, fontFamily: "Inter_700Bold", color: Colors.text,
-    letterSpacing: -0.5,
+  logoImage: {
+    width: "100%",
+    height: "100%",
   },
-  tagline: {
-    fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.subtext,
-    marginTop: 4,
+
+  // Title Section
+  titleSection: {
+    alignItems: "center",
+    marginBottom: 32,
   },
-  formCard: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 20, padding: 24,
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+  heroTitle: {
+    fontSize: 32,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    textAlign: "center",
+    lineHeight: 38,
   },
-  tabRow: {
-    flexDirection: "row", marginBottom: 24,
-    backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 12,
-    padding: 3,
+
+  // Google Button
+  googleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.text,
+    borderRadius: 25,
+    height: 50,
+    marginBottom: 12,
+    gap: 12,
   },
-  tab: {
-    flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center",
+  googleIconCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  tabActive: { backgroundColor: Colors.primary },
-  tabText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.subtext },
-  tabTextActive: { color: Colors.black },
-  inputGroup: { marginBottom: 16 },
-  inputLabel: {
-    fontSize: 12, fontFamily: "Inter_600SemiBold", color: Colors.subtext,
-    marginBottom: 6, marginLeft: 4,
+  googleBtnText: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.black,
   },
-  inputWrap: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 12, paddingHorizontal: 14, height: 48,
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.06)",
-  },
-  inputIcon: { marginRight: 10 },
-  input: {
-    flex: 1, color: Colors.text, fontSize: 15,
-    fontFamily: "Inter_400Regular",
-  },
-  passwordInput: { paddingRight: 4 },
-  submitBtn: {
-    backgroundColor: Colors.primary, borderRadius: 12,
-    height: 50, alignItems: "center", justifyContent: "center",
-    marginTop: 8,
-  },
-  submitBtnDisabled: { opacity: 0.6 },
-  submitBtnText: {
-    fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.black,
-  },
-  divider: {
-    flexDirection: "row", alignItems: "center",
-    marginVertical: 20,
-  },
-  dividerLine: { flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.1)" },
-  dividerText: {
-    fontSize: 12, fontFamily: "Inter_500Medium", color: Colors.inactive,
-    marginHorizontal: 16,
-  },
-  socialBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    height: 48, borderRadius: 12, borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)", marginBottom: 10, gap: 10,
-  },
-  socialBtnText: {
-    fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.text,
-  },
+
+  // Guest Button
   guestBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    height: 48, borderRadius: 12, borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)", gap: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    height: 50,
+    marginBottom: 24,
   },
   guestBtnText: {
-    fontSize: 14, fontFamily: "Inter_500Medium", color: Colors.subtext,
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
   },
-  switchRow: {
-    flexDirection: "row", justifyContent: "center",
-    marginTop: 20, gap: 4,
+
+  // Form Section
+  formSection: {
+    gap: 10,
   },
-  switchText: { fontSize: 13, fontFamily: "Inter_400Regular", color: Colors.subtext },
-  switchLink: { fontSize: 13, fontFamily: "Inter_700Bold", color: Colors.text },
+  inputGroup: {
+    marginBottom: 10,
+  },
+  input: {
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    height: 48,
+    color: Colors.text,
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  passwordContainer: {
+    position: "relative",
+  },
+  passwordInput: {
+    paddingRight: 50,
+  },
+  eyeIcon: {
+    position: "absolute",
+    right: 16,
+    top: 14,
+  },
+  forgotPassword: {
+    alignSelf: "flex-end",
+    marginBottom: 6,
+  },
+  forgotPasswordText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+  },
+  loginBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 25,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 6,
+  },
+  loginBtnDisabled: {
+    opacity: 0.6,
+  },
+  loginBtnText: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    color: Colors.black,
+  },
+  signupPrompt: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 16,
+  },
+  signupPromptText: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: Colors.subtext,
+  },
+  signupLink: {
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    textDecorationLine: "underline",
+  },
+
+  // Signup Screen
+  signupContent: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    justifyContent: "center",
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  signupHeader: {
+    marginBottom: 24,
+  },
+  signupTitle: {
+    fontSize: 24,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    textAlign: "center",
+  },
+  signupForm: {
+    gap: 10,
+  },
 });

@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { View, Pressable, StyleSheet, Platform } from "react-native";
+import React, { useEffect, useMemo, memo, useCallback } from "react";
+import { View, Pressable, StyleSheet, Platform, ActivityIndicator } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -13,54 +13,89 @@ interface MiniPlayerProps {
   bottomOffset?: number;
 }
 
-export default function MiniPlayer({ bottomOffset }: MiniPlayerProps) {
+// Memoized play button to prevent flickering
+const PlayButton = memo(({ isPlaying, onPress }: { 
+  isPlaying: boolean; 
+  onPress: () => void;
+}) => {
+  return (
+    <Pressable onPress={onPress} hitSlop={12} style={styles.playBtn}>
+      <Ionicons 
+        name={isPlaying ? "pause" : "play"} 
+        size={18} 
+        color={Colors.black}
+        style={!isPlaying ? { marginLeft: 1 } : undefined}
+      />
+    </Pressable>
+  );
+}, (prevProps, nextProps) => {
+  // Only re-render if isPlaying actually changed
+  return prevProps.isPlaying === nextProps.isPlaying;
+});
+
+PlayButton.displayName = "PlayButton";
+
+function MiniPlayer({ bottomOffset }: MiniPlayerProps) {
+  let playerContext;
+  try {
+    playerContext = usePlayer();
+  } catch (error) {
+    return null;
+  }
+
   const { 
     currentSong, 
     isPlaying, 
     togglePlay, 
-    progress, 
-    isLoading,
+    progress,
     albumColor,
     textColor,
     setAlbumColor,
     setTextColor,
-  } = usePlayer();
+  } = playerContext;
 
-  // Extract and store color when song changes
+  const handleTogglePlay = useCallback(() => {
+    try {
+      if (Platform.OS !== "web") {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+      togglePlay();
+    } catch (error) {
+      // Silent fail
+    }
+  }, [togglePlay]);
+
+  const progressWidth = useMemo(() => {
+    const width = Math.max(0, Math.min(100, progress * 100));
+    return isNaN(width) ? 0 : width;
+  }, [progress]);
+
   useEffect(() => {
     if (currentSong?.coverUrl) {
       extractDominantColor(currentSong.coverUrl).then((colors) => {
         setAlbumColor(colors.primary);
         setTextColor(colors.text);
-      });
+      }).catch(() => {});
     }
   }, [currentSong?.id]);
 
   if (!currentSong) return null;
 
-  const handlePress = () => {
-    router.push("/player");
-  };
-
-  const handleTogglePlay = () => {
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    togglePlay();
-  };
-
-  const handleQueuePress = () => {
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push("/queue");
-  };
-
   return (
     <View
-      style={[styles.wrapper, { bottom: bottomOffset ?? (Platform.OS === "web" ? 84 : 58) }]}
+      style={[styles.wrapper, { bottom: bottomOffset ?? (Platform.OS === "web" ? 84 : 68) }]}
+      pointerEvents="box-none"
     >
-      {/* Floating Container with Dynamic Color */}
       <View style={[styles.floatingContainer, { backgroundColor: albumColor }]}>
-        <Pressable style={styles.container} onPress={handlePress}>
+        <Pressable style={styles.container} onPress={() => router.push("/player")}>
           <View style={styles.leftSection}>
-            <Image source={{ uri: currentSong.coverUrl }} style={styles.cover} contentFit="cover" />
+            <Image 
+              source={{ uri: currentSong.coverUrl }} 
+              style={styles.cover} 
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              priority="high"
+            />
             <View style={styles.info}>
               <PingPongScroll
                 text={currentSong.title}
@@ -76,32 +111,38 @@ export default function MiniPlayer({ bottomOffset }: MiniPlayerProps) {
           </View>
           
           <View style={styles.controls}>
-            <Pressable onPress={handleTogglePlay} hitSlop={12} style={styles.playBtn}>
-              {isLoading ? (
-                <View style={styles.loadingDot} />
-              ) : (
-                <Ionicons 
-                  name={isPlaying ? "pause" : "play"} 
-                  size={24} 
-                  color={Colors.black}
-                />
-              )}
-            </Pressable>
+            <PlayButton 
+              isPlaying={isPlaying} 
+              onPress={handleTogglePlay}
+            />
 
-            <Pressable onPress={handleQueuePress} hitSlop={12} style={styles.iconBtn}>
-              <Ionicons name="list" size={20} color={textColor} />
+            <Pressable onPress={() => router.push("/queue")} hitSlop={12} style={styles.iconBtn}>
+              <Ionicons name="list" size={18} color={textColor} />
             </Pressable>
           </View>
         </Pressable>
 
-        {/* Progress bar at bottom of floating container */}
+        {/* Progress bar */}
         <View style={styles.progressBarContainer}>
-          <View style={[styles.progressFill, { width: `${progress * 100}%`, backgroundColor: textColor }]} />
+          <View 
+            style={[
+              styles.progressFill, 
+              { 
+                width: `${progressWidth}%`, 
+                backgroundColor: textColor 
+              }
+            ]} 
+          />
         </View>
       </View>
     </View>
   );
 }
+
+export default memo(MiniPlayer, (prevProps, nextProps) => {
+  // Only re-render if bottomOffset changes
+  return prevProps.bottomOffset === nextProps.bottomOffset;
+});
 
 const styles = StyleSheet.create({
   wrapper: {
@@ -113,55 +154,56 @@ const styles = StyleSheet.create({
   floatingContainer: {
     borderRadius: 8,
     overflow: "hidden",
-    elevation: 12,
+    elevation: 16,
     shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
   },
   progressBarContainer: {
     position: "absolute",
-    bottom: 1,
-    left: 8,
-    right: 8,
+    bottom: 0,
+    left: 0,
+    right: 0,
     height: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
   },
   progressFill: {
     height: 2,
-    borderRadius: 2,
   },
   container: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    paddingBottom: 6,
+    paddingVertical: 6,
+    paddingBottom: 8,
     height: 56,
   },
   leftSection: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
-    marginRight: 12,
+    marginRight: 8,
   },
   cover: {
-    width: 32,
-    height: 32,
+    width: 40,
+    height: 40,
     borderRadius: 4,
+    backgroundColor: Colors.surfaceLight,
   },
   info: {
     flex: 1,
     marginLeft: 10,
   },
   title: {
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
   },
   artist: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: "Inter_400Regular",
     marginTop: 2,
   },
@@ -171,22 +213,17 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   iconBtn: {
-    padding: 6,
+    width: 32,
+    height: 32,
     justifyContent: "center",
     alignItems: "center",
   },
   playBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: Colors.text,
     justifyContent: "center",
     alignItems: "center",
-  },
-  loadingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.black,
   },
 });

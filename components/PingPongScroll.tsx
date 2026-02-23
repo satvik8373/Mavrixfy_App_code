@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Animated, StyleSheet } from "react-native";
+import { View, Text, Animated, StyleSheet, LayoutChangeEvent } from "react-native";
 
 interface PingPongScrollProps {
   text: string;
@@ -18,61 +18,65 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   const [containerWidth, setContainerWidth] = useState(0);
   const [textWidth, setTextWidth] = useState(0);
   const animatedValue = useRef(new Animated.Value(0)).current;
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    if (needsScroll && containerWidth > 0 && textWidth > 0) {
-      const distance = textWidth - containerWidth;
+    // Stop any existing animation
+    if (animationRef.current) {
+      animationRef.current.stop();
+      animatedValue.setValue(0);
+    }
+
+    // Check if text overflows container
+    const shouldScroll = textWidth > containerWidth && containerWidth > 0 && textWidth > 0;
+    
+    if (shouldScroll) {
+      setNeedsScroll(true);
+      const distance = textWidth - containerWidth + 30; // Add extra padding
       const duration = (distance / velocity) * 1000;
 
       const animation = Animated.loop(
         Animated.sequence([
-          Animated.delay(2000),
+          Animated.delay(1500), // Initial delay
           Animated.timing(animatedValue, {
             toValue: -distance,
             duration: duration,
             useNativeDriver: true,
           }),
-          Animated.delay(1000),
+          Animated.delay(1000), // Pause at end
           Animated.timing(animatedValue, {
             toValue: 0,
             duration: duration,
             useNativeDriver: true,
           }),
+          Animated.delay(1000), // Pause at start
         ])
       );
 
+      animationRef.current = animation;
       animation.start();
 
       return () => {
         animation.stop();
       };
+    } else {
+      setNeedsScroll(false);
     }
-  }, [needsScroll, containerWidth, textWidth, velocity, animatedValue]);
+  }, [containerWidth, textWidth, velocity, animatedValue, text]);
 
-  const handleContainerLayout = (event: any) => {
+  const handleContainerLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;
-    setContainerWidth(width);
+    if (width > 0 && width !== containerWidth) {
+      setContainerWidth(width);
+    }
   };
 
-  const handleTextLayout = (event: any) => {
+  const handleTextLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;
-    setTextWidth(width);
-    setNeedsScroll(width > containerWidth);
+    if (width > 0 && width !== textWidth) {
+      setTextWidth(width);
+    }
   };
-
-  if (!needsScroll) {
-    return (
-      <View style={styles.container} onLayout={handleContainerLayout}>
-        <Text
-          style={[styles.text, style]}
-          numberOfLines={1}
-          onLayout={handleTextLayout}
-        >
-          {text}
-        </Text>
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container} onLayout={handleContainerLayout}>
@@ -80,7 +84,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
         style={[
           styles.text,
           style,
-          {
+          needsScroll && {
             transform: [{ translateX: animatedValue }],
           },
         ]}

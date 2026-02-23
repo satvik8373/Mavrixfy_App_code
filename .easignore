@@ -1,34 +1,22 @@
 # EAS Build ignore file
-# Files and directories listed here will not be uploaded to EAS Build
+# Reduce upload size by excluding unnecessary files
 
-# Development files
-.git/
-.github/
-.vscode/
+# Node modules (will be installed on build server)
+node_modules/
+
+# Build outputs
+android/app/build/
+android/.gradle/
+android/build/
+
+# IDE files
 .idea/
-.local/
+.vscode/
+*.iml
 
-# Server files (not needed for mobile app)
-server/
-server_dist/
-drizzle/
-
-# Documentation
-*.md
-!README.md
-
-# Test files
-**/__tests__/
-**/*.test.ts
-**/*.test.tsx
-**/*.spec.ts
-**/*.spec.tsx
-
-# Build artifacts
-dist/
-build/
-.expo/
-.expo-shared/
+# OS files
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
@@ -36,26 +24,22 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment files (use EAS Secrets instead)
-.env
-.env.local
-.env.*.local
+# Test files
+__tests__/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
 
-# IDE
-.DS_Store
-Thumbs.db
+# Documentation
+*.md
+docs/
 
-# Scripts not needed for build
-scripts/fix-dependencies.js
-scripts/generate-app-icons.js
-analyze-bundle.js
+# Git
+.git/
+.gitignore
 
-# Attached assets (development only)
-attached_assets/
-
-# Patches (will be applied during build)
-patches/
-
-# Android/iOS native directories (EAS will generate these)
-android/
-ios/
+# Temporary files
+*.tmp
+*.temp
+.cache/

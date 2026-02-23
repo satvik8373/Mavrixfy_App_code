@@ -1,0 +1,27 @@
+{
+  "latestVersion": "1.1.0",
+  "minimumSupportedVersion": "1.0.0",
+  "forceUpdate": false,
+  "updateUrl": {
+    "android": "https://play.google.com/store/apps/details?id=com.mavrixfy.app",
+    "ios": "https://apps.apple.com/app/mavrixfy/id123456789"
+  },
+  "message": "New version available with improved performance and bug fixes",
+  "changelog": [
+    "Fixed JioSaavn playlist showing only 10 songs",
+    "Improved music streaming performance",
+    "Enhanced UI animations",
+    "Bug fixes and stability improvements"
+  ],
+  "releaseDate": "2026-02-23",
+  "features": [
+    {
+      "title": "Complete Playlists",
+      "description": "Now see all songs in JioSaavn playlists, not just 10"
+    },
+    {
+      "title": "Better Performance",
+      "description": "Faster loading and smoother playback"
+    }
+  ]
+}

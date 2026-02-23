@@ -3,6 +3,7 @@ import {
   View,
   Text,
   ScrollView,
+  FlatList,
   Pressable,
   StyleSheet,
   Platform,
@@ -33,51 +34,63 @@ type DisplayPlaylist = UserPlaylist & { isFirestore?: boolean };
 
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
-  const [filter, setFilter] = useState<Filter>("playlists");
-  const { likedSongIds } = usePlayer();
+  const { likedSongIds: playerLikedSongIds } = usePlayer(); // Renamed to avoid conflict
   const { user } = useAuth();
   const [playlists, setPlaylists] = useState<DisplayPlaylist[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
+  const [filter, setFilter] = useState<Filter>("playlists");
+  const [likedSongIds, setLikedSongIds] = useState<string[]>([]);
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
+  // Function to load all playlists from both sources
   const loadPlaylists = useCallback(async () => {
     try {
-      let allPlaylists: DisplayPlaylist[] = [];
-
-      if (user && user.id) {
-        // User is authenticated - load from both Firestore and AsyncStorage
-        const [firestorePlaylists, localPlaylists] = await Promise.all([
-          getUserFirestorePlaylists(user.id),
-          getUserPlaylists(),
-        ]);
-
-        // Convert Firestore playlists to display format
-        const convertedFirestore: DisplayPlaylist[] = firestorePlaylists.map((fp) => ({
-          id: fp.id,
-          name: fp.name,
-          description: fp.description,
-          coverUrl: fp.imageUrl,
-          songs: [], // We don't need the actual songs in the list view
-          createdAt: new Date(fp.createdAt).getTime(),
-          updatedAt: new Date(fp.updatedAt).getTime(),
-          isFirestore: true,
-        }));
-
-        // Find local-only playlists (ones that don't exist in Firestore)
-        const firestoreIds = new Set(firestorePlaylists.map((fp) => fp.id));
-        const localOnlyPlaylists = localPlaylists.filter((p) => !firestoreIds.has(p.id));
-
-        // Merge: Firestore playlists first, then local-only playlists
-        allPlaylists = [...convertedFirestore, ...localOnlyPlaylists];
-      } else {
-        // Guest user or not authenticated - load from AsyncStorage only
-        const localPlaylists = await getUserPlaylists();
-        allPlaylists = localPlaylists;
+      if (!user) {
+        setPlaylists([]);
+        return;
       }
 
-      setPlaylists(allPlaylists);
+      // Load Firestore playlists
+      const firestorePlaylists = await getUserFirestorePlaylists(user.id);
+      const formattedFirestorePlaylists: DisplayPlaylist[] = firestorePlaylists.map(
+        (p: FirestorePlaylist): DisplayPlaylist => ({
+          id: p.id,
+          name: p.name,
+          description: p.description || "",
+          coverUrl: p.imageUrl || p.songs?.[0]?.imageUrl || "", // Use imageUrl from FirestorePlaylist
+          songs: p.songs.map((fs: any) => ({
+            id: fs.id,
+            title: fs.title,
+            artist: fs.artist,
+            coverUrl: fs.imageUrl,
+            audioUrl: fs.audioUrl,
+            duration: fs.duration,
+            album: "",
+            genre: "",
+          })),
+          createdAt: new Date(p.createdAt).getTime(),
+          updatedAt: new Date(p.updatedAt).getTime(),
+          isFirestore: true,
+        })
+      );
+
+      // Load AsyncStorage playlists
+      const localPlaylists = await getUserPlaylists();
+      const formattedLocalPlaylists: DisplayPlaylist[] = localPlaylists.map(
+        (p): DisplayPlaylist => ({
+          ...p,
+          isFirestore: false, // Local playlists are not Firestore
+          coverUrl: p.coverUrl || p.songs?.[0]?.coverUrl || "",
+        })
+      );
+
+      // Merge: Firestore playlists first, then local-only playlists (those not in Firestore)
+      const firestoreIds = new Set(firestorePlaylists.map((fp: FirestorePlaylist) => fp.id));
+      const localOnlyPlaylists = formattedLocalPlaylists.filter((p) => !firestoreIds.has(p.id));
+
+      setPlaylists([...formattedFirestorePlaylists, ...localOnlyPlaylists]);
     } catch (error) {
       console.error("Error loading playlists:", error);
       // Fallback to AsyncStorage on error
@@ -100,11 +113,10 @@ export default function LibraryScreen() {
       if (user && user.id) {
         // Create in Firestore for authenticated users
         const firestoreId = await createFirestorePlaylist(
-          name,
           user.id,
-          user.name,
-          user.picture,
-          false
+          user.name || "Unknown User",
+          name,
+          "" // Optional description
         );
 
         if (firestoreId) {
@@ -156,6 +168,76 @@ export default function LibraryScreen() {
     setShowCreateModal(true);
   };
 
+  // Memoize empty component
+  const ListEmptyComponent = useMemo(() => {
+    if (filter === "playlists" && playlists.length === 0) {
+      return (
+        <View style={styles.empty}>
+          <Ionicons name="musical-notes-outline" size={48} color={Colors.inactive} />
+          <Text style={styles.emptyText}>Create your first playlist</Text>
+          <Pressable style={styles.emptyButton} onPress={handleAddPress}>
+            <Text style={styles.emptyButtonText}>Create Playlist</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return null;
+  }, [filter, playlists.length]);
+
+  // Render individual playlist
+  const renderPlaylistItem = useCallback(({ item: playlist }: { item: DisplayPlaylist }) => (
+    <Pressable
+      style={({ pressed }) => [styles.playlistRow, pressed && styles.pressed]}
+      onPress={() => {
+        if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        if (playlist.isFirestore) {
+          router.push({
+            pathname: "/playlist/[id]",
+            params: { id: playlist.id, firestore: "true" },
+          });
+        } else {
+          router.push({ pathname: "/playlist/[id]", params: { id: playlist.id } });
+        }
+      }}
+      onLongPress={() => handleDeletePlaylist(playlist)}
+    >
+      {playlist.coverUrl ? (
+        <Image source={{ uri: playlist.coverUrl }} style={styles.playlistCover} contentFit="cover" />
+      ) : (
+        <View style={[styles.playlistCover, styles.playlistCoverPlaceholder]}>
+          <Ionicons name="musical-notes" size={24} color={Colors.inactive} />
+        </View>
+      )}
+      <View style={styles.playlistInfo}>
+        <Text style={styles.playlistName} numberOfLines={1}>{playlist.name}</Text>
+        <Text style={styles.playlistMeta} numberOfLines={1}>
+          Playlist · {playlist.songs.length} songs
+        </Text>
+      </View>
+    </Pressable>
+  ), [router]);
+
+  // Use ListHeaderComponent for heavy header block
+  const ListHeaderComponent = useMemo(() => (
+    <Pressable
+      style={({ pressed }) => [styles.likedCard, pressed && styles.pressed]}
+      onPress={() => router.push("/(tabs)/liked-songs")}
+    >
+      <LinearGradient
+        colors={["#5b4a9e", "#3b82f6", "#7c3aed"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.likedGradient}
+      >
+        <Ionicons name="heart" size={24} color={Colors.text} />
+      </LinearGradient>
+      <View style={styles.likedInfo}>
+        <Text style={styles.likedTitle}>Liked Songs</Text>
+        <Text style={styles.likedCount}>{likedSongIds.length} songs</Text>
+      </View>
+    </Pressable>
+  ), [likedSongIds.length, router]);
+
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       <View style={styles.headerRow}>
@@ -184,99 +266,20 @@ export default function LibraryScreen() {
         </Pressable>
       </View>
 
-      <ScrollView
+      <FlatList
+        data={filter === "playlists" ? playlists : []}
+        keyExtractor={(item) => item.id}
+        renderItem={renderPlaylistItem}
         style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: 160 }}
         showsVerticalScrollIndicator={false}
-      >
-        <Pressable
-          style={({ pressed }) => [styles.likedCard, pressed && styles.pressed]}
-          onPress={() => router.push("/liked-songs")}
-        >
-          <LinearGradient
-            colors={["#5b4a9e", "#3b82f6", "#7c3aed"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.likedGradient}
-          >
-            <Ionicons name="heart" size={24} color={Colors.text} />
-          </LinearGradient>
-          <View style={styles.likedInfo}>
-            <Text style={styles.likedTitle}>Liked Songs</Text>
-            <Text style={styles.likedCount}>{likedSongIds.length} songs</Text>
-          </View>
-        </Pressable>
-
-        {filter === "playlists" && (
-          <>
-            {playlists.length === 0 ? (
-              <View style={styles.empty}>
-                <Ionicons name="musical-notes-outline" size={48} color={Colors.inactive} />
-                <Text style={styles.emptyText}>Create your first playlist</Text>
-                <Pressable
-                  style={styles.emptyButton}
-                  onPress={handleAddPress}
-                >
-                  <Text style={styles.emptyButtonText}>Create Playlist</Text>
-                </Pressable>
-              </View>
-            ) : (
-              playlists.map((playlist) => (
-                <Pressable
-                  key={playlist.id}
-                  style={({ pressed }) => [styles.playlistRow, pressed && styles.pressed]}
-                  onPress={() => {
-                    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    if (playlist.isFirestore) {
-                      router.push({
-                        pathname: "/playlist/[id]",
-                        params: { id: playlist.id, firestore: "true" },
-                      });
-                    } else {
-                      router.push({ pathname: "/playlist/[id]", params: { id: playlist.id } });
-                    }
-                  }}
-                  onLongPress={() => handleDeletePlaylist(playlist)}
-                >
-                  {playlist.coverUrl ? (
-                    <Image source={{ uri: playlist.coverUrl }} style={styles.playlistCover} contentFit="cover" />
-                  ) : (
-                    <View style={[styles.playlistCover, styles.playlistCoverPlaceholder]}>
-                      <Ionicons name="musical-notes" size={24} color={Colors.inactive} />
-                    </View>
-                  )}
-                  <View style={styles.playlistInfo}>
-                    <Text style={styles.playlistName} numberOfLines={1}>{playlist.name}</Text>
-                    <Text style={styles.playlistMeta} numberOfLines={1}>
-                      Playlist · {playlist.songs.length} songs
-                    </Text>
-                  </View>
-                </Pressable>
-              ))
-            )}
-          </>
-        )}
-
-        {filter === "liked" && (
-          <Pressable
-            style={({ pressed }) => [styles.likedCard, pressed && styles.pressed]}
-            onPress={() => router.push("/liked-songs")}
-          >
-            <LinearGradient
-              colors={["#5b4a9e", "#3b82f6", "#7c3aed"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.likedGradient}
-            >
-              <Ionicons name="heart" size={24} color={Colors.text} />
-            </LinearGradient>
-            <View style={styles.likedInfo}>
-              <Text style={styles.likedTitle}>Liked Songs</Text>
-              <Text style={styles.likedCount}>{likedSongIds.length} songs</Text>
-            </View>
-          </Pressable>
-        )}
-      </ScrollView>
+        ListHeaderComponent={ListHeaderComponent}
+        ListEmptyComponent={ListEmptyComponent}
+        initialNumToRender={15}
+        maxToRenderPerBatch={15}
+        windowSize={11}
+        removeClippedSubviews={Platform.OS === 'android'}
+      />
 
       <Modal
         visible={showCreateModal}
@@ -285,7 +288,7 @@ export default function LibraryScreen() {
         onRequestClose={() => setShowCreateModal(false)}
       >
         <Pressable style={styles.modalOverlay} onPress={() => setShowCreateModal(false)}>
-          <Pressable style={styles.modalContent} onPress={() => {}}>
+          <Pressable style={styles.modalContent} onPress={() => { }}>
             <Text style={styles.modalTitle}>New Playlist</Text>
             <TextInput
               style={styles.modalInput}
@@ -509,3 +512,4 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
 });
+

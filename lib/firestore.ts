@@ -1,329 +1,287 @@
 import {
   collection,
-  query,
-  where,
-  getDocs,
   doc,
+  getDocs,
   getDoc,
   setDoc,
-  deleteDoc,
-  orderBy,
-  limit as firestoreLimit,
   addDoc,
-  updateDoc,
-  arrayUnion,
-  arrayRemove,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  limit,
   serverTimestamp,
 } from "firebase/firestore";
-import { db, auth } from "./firebase";
-import { Song } from "./musicData";
+import { db } from "./firebase";
 
 export interface FirestorePlaylist {
   id: string;
   name: string;
-  description: string;
-  imageUrl: string;
-  isPublic: boolean;
-  featured: boolean;
-  songs: FirestoreSong[];
+  description?: string;
+  imageUrl?: string;
+  songs: any[];
   createdBy: {
     id: string;
-    uid: string;
-    fullName: string;
-    imageUrl: string;
+    name: string;
   };
-  createdAt: string;
-  updatedAt: string;
+  isPublic: boolean;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
-export interface FirestoreSong {
-  id: string;
-  title: string;
-  artist: string;
-  albumId: string | null;
-  imageUrl: string;
-  audioUrl: string;
-  duration: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-function songToFirestore(song: Song): FirestoreSong {
-  return {
-    id: song.id,
-    title: song.title,
-    artist: song.artist,
-    albumId: null,
-    imageUrl: song.coverUrl,
-    audioUrl: song.audioUrl,
-    duration: song.duration,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function firestoreSongToSong(fs: FirestoreSong): Song {
-  return {
-    id: fs.id,
-    title: fs.title,
-    artist: fs.artist,
-    coverUrl: fs.imageUrl,
-    audioUrl: fs.audioUrl,
-    duration: fs.duration,
-    album: "",
-  };
-}
-
-function convertPlaylistDoc(docSnap: any): FirestorePlaylist {
-  const data = docSnap.data();
-  return {
-    id: docSnap.id,
-    name: data.name || "",
-    description: data.description || "",
-    imageUrl: data.imageUrl || "",
-    isPublic: data.isPublic ?? false,
-    featured: data.featured ?? false,
-    songs: data.songs || [],
-    createdBy: data.createdBy || { id: "", uid: "", fullName: "Unknown", imageUrl: "" },
-    createdAt: data.createdAt?.toDate?.()?.toISOString?.() || data.createdAt || "",
-    updatedAt: data.updatedAt?.toDate?.()?.toISOString?.() || data.updatedAt || "",
-  };
-}
-
-export async function getPublicPlaylists(maxResults = 20): Promise<FirestorePlaylist[]> {
-  try {
-    const q = query(
-      collection(db, "playlists"),
-      where("isPublic", "==", true),
-      firestoreLimit(maxResults)
-    );
-    const snap = await getDocs(q);
-    return snap.docs.map(convertPlaylistDoc);
-  } catch (error) {
-    if (__DEV__) console.error("Error fetching public playlists:", error);
-    return [];
-  }
-}
-
-export async function getFeaturedPlaylists(maxResults = 10): Promise<FirestorePlaylist[]> {
-  try {
-    const q = query(
-      collection(db, "playlists"),
-      where("featured", "==", true),
-      firestoreLimit(maxResults)
-    );
-    const snap = await getDocs(q);
-    return snap.docs.map(convertPlaylistDoc);
-  } catch (error) {
-    if (__DEV__) console.error("Error fetching featured playlists:", error);
-    return [];
-  }
-}
-
+// Get user playlists from Firestore
 export async function getUserFirestorePlaylists(userId: string): Promise<FirestorePlaylist[]> {
   try {
-    const q = query(
-      collection(db, "playlists"),
-      where("createdBy.uid", "==", userId)
-    );
-    const snap = await getDocs(q);
-    return snap.docs.map(convertPlaylistDoc);
+    if (!db) {
+      return [];
+    }
+
+    const playlistsRef = collection(db, "playlists");
+    const q = query(playlistsRef, where("createdBy.id", "==", userId));
+    const querySnapshot = await getDocs(q);
+
+    const playlists: FirestorePlaylist[] = [];
+    querySnapshot.forEach((doc) => {
+      playlists.push({ id: doc.id, ...doc.data() } as FirestorePlaylist);
+    });
+
+    return playlists;
   } catch (error) {
-    if (__DEV__) console.error("Error fetching user playlists:", error);
     return [];
   }
 }
 
-export async function getPlaylistById(playlistId: string): Promise<FirestorePlaylist | null> {
-  try {
-    const docSnap = await getDoc(doc(db, "playlists", playlistId));
-    if (!docSnap.exists()) return null;
-    return convertPlaylistDoc(docSnap);
-  } catch (error) {
-    if (__DEV__) console.error("Error fetching playlist:", error);
-    return null;
-  }
-}
-
+// Create playlist in Firestore
 export async function createFirestorePlaylist(
-  name: string,
   userId: string,
   userName: string,
-  userImage: string = "",
-  isPublic: boolean = false
-): Promise<string | null> {
+  name: string,
+  description?: string
+): Promise<FirestorePlaylist | null> {
   try {
-    const docRef = await addDoc(collection(db, "playlists"), {
+    if (!db) {
+      return null;
+    }
+
+    const playlistsRef = collection(db, "playlists");
+    const docRef = await addDoc(playlistsRef, {
       name,
-      description: "",
-      imageUrl: "",
-      isPublic,
-      featured: false,
+      description: description || "",
       songs: [],
       createdBy: {
         id: userId,
-        uid: userId,
-        fullName: userName,
-        imageUrl: userImage,
+        name: userName,
       },
+      isPublic: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    return docRef.id;
+
+    return {
+      id: docRef.id,
+      name,
+      description,
+      songs: [],
+      createdBy: {
+        id: userId,
+        name: userName,
+      },
+      isPublic: false,
+    };
   } catch (error) {
-    if (__DEV__) console.error("Error creating playlist:", error);
     return null;
   }
 }
 
+// Delete playlist from Firestore
 export async function deleteFirestorePlaylist(playlistId: string): Promise<boolean> {
   try {
-    await deleteDoc(doc(db, "playlists", playlistId));
-    return true;
-  } catch (error) {
-    if (__DEV__) console.error("Error deleting playlist:", error);
-    return false;
-  }
-}
+    if (!db) {
+      return false;
+    }
 
-export async function addSongToFirestorePlaylist(playlistId: string, song: Song): Promise<boolean> {
-  try {
     const playlistRef = doc(db, "playlists", playlistId);
-    const fsSong = songToFirestore(song);
-    await updateDoc(playlistRef, {
-      songs: arrayUnion(fsSong),
-      updatedAt: serverTimestamp(),
-    });
+    await deleteDoc(playlistRef);
     return true;
   } catch (error) {
-    if (__DEV__) console.error("Error adding song to playlist:", error);
     return false;
   }
 }
 
-export async function removeSongFromFirestorePlaylist(playlistId: string, songId: string): Promise<boolean> {
+// Get public playlists from Firestore
+export async function getPublicPlaylists(maxCount: number = 50): Promise<FirestorePlaylist[]> {
   try {
-    const playlistRef = doc(db, "playlists", playlistId);
-    const playlistSnap = await getDoc(playlistRef);
-    if (!playlistSnap.exists()) return false;
-    const data = playlistSnap.data();
-    const updatedSongs = (data.songs || []).filter((s: any) => s.id !== songId);
-    await updateDoc(playlistRef, {
-      songs: updatedSongs,
-      updatedAt: serverTimestamp(),
-    });
-    return true;
-  } catch (error) {
-    if (__DEV__) console.error("Error removing song:", error);
-    return false;
-  }
-}
-
-export async function getLikedSongsFromFirestore(userId: string): Promise<Song[]> {
-  try {
-    if (__DEV__) console.log(`📡 Fetching liked songs from Firestore path: likedSongs/${userId}`);
-    const docSnap = await getDoc(doc(db, "likedSongs", userId));
-    
-    if (!docSnap.exists()) {
-      if (__DEV__) console.log("📭 No liked songs document found (this is normal for new users)");
+    if (!db) {
       return [];
     }
-    
-    const data = docSnap.data();
-    const songs: any[] = data.songs || [];
-    if (__DEV__) console.log(`✅ Successfully fetched ${songs.length} liked songs from Firestore`);
-    
-    return songs.map((s) => ({
-      id: s.id || s._id || "",
-      title: s.title || "",
-      artist: s.artist || "",
-      coverUrl: s.imageUrl || s.coverUrl || "",
-      audioUrl: s.audioUrl || "",
-      duration: s.duration || 0,
-      album: s.album || "",
-    }));
-  } catch (error: any) {
-    if (__DEV__) {
-      console.error("❌ Error fetching liked songs from Firestore:", error);
-      console.error("Error code:", error?.code);
-      console.error("Error message:", error?.message);
-    }
+
+    const playlistsRef = collection(db, "playlists");
+    const q = query(playlistsRef, where("isPublic", "==", true), limit(maxCount));
+    const querySnapshot = await getDocs(q);
+
+    const playlists: FirestorePlaylist[] = [];
+    querySnapshot.forEach((doc) => {
+      playlists.push({ id: doc.id, ...doc.data() } as FirestorePlaylist);
+    });
+
+    return playlists;
+  } catch (error) {
     return [];
   }
 }
 
-export async function addLikedSongToFirestore(userId: string, song: Song): Promise<boolean> {
+// Get liked songs from Firestore (matches web implementation)
+export async function getLikedSongsFromFirestore(userId: string): Promise<any[]> {
   try {
-    if (__DEV__) console.log(`📡 Adding song to Firestore: likedSongs/${userId}`);
-    const docRef = doc(db, "likedSongs", userId);
-    const fsSong = songToFirestore(song);
-    const docSnap = await getDoc(docRef);
-    
-    if (!docSnap.exists()) {
-      if (__DEV__) console.log("📝 Creating new liked songs document");
-      await setDoc(docRef, { songs: [fsSong], updatedAt: serverTimestamp() });
-    } else {
-      if (__DEV__) console.log("📝 Updating existing liked songs document");
-      await updateDoc(docRef, {
-        songs: arrayUnion(fsSong),
-        updatedAt: serverTimestamp(),
+    if (!db) {
+      return [];
+    }
+
+    const likedSongsRef = collection(db, "users", userId, "likedSongs");
+
+    let snapshot;
+    try {
+      const q = query(likedSongsRef, orderBy('likedAt', 'desc'));
+      snapshot = await getDocs(q);
+    } catch (orderError) {
+      snapshot = await getDocs(likedSongsRef);
+    }
+
+    const likedSongs: any[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      const songId = docSnap.id;
+
+      if (!songId) {
+        return;
+      }
+
+      likedSongs.push({
+        id: songId,
+        title: data.title || data.name || "",
+        artist: data.artist || data.artists || "",
+        coverUrl: data.imageUrl || data.coverUrl || data.image || "",
+        audioUrl: data.audioUrl || data.url || data.previewUrl || "",
+        duration: data.duration || 0,
+        album: data.album || data.albumName || "",
+        addedAt: data.likedAt || data.addedAt || data.syncedAt,
+        source: data.source,
+        spotifyId: data.spotifyId,
+        spotifyUrl: data.spotifyUrl,
+        trackId: data.trackId,
+        albumId: data.albumId,
       });
-    }
-    if (__DEV__) console.log(`✅ Successfully added "${song.title}" to Firestore`);
-    return true;
-  } catch (error: any) {
-    if (__DEV__) {
-      console.error(`❌ Error adding liked song to Firestore:`, error);
-      console.error("Error code:", error?.code);
-      console.error("Error message:", error?.message);
-    }
-    return false;
-  }
-}
-
-export async function removeLikedSongFromFirestore(userId: string, songId: string): Promise<boolean> {
-  try {
-    if (__DEV__) console.log(`📡 Removing song from Firestore: likedSongs/${userId}`);
-    const docRef = doc(db, "likedSongs", userId);
-    const docSnap = await getDoc(docRef);
-    if (!docSnap.exists()) {
-      if (__DEV__) console.log("⚠️ No liked songs document found");
-      return false;
-    }
-    const data = docSnap.data();
-    const updatedSongs = (data.songs || []).filter((s: any) => s.id !== songId);
-    await updateDoc(docRef, {
-      songs: updatedSongs,
-      updatedAt: serverTimestamp(),
     });
-    if (__DEV__) console.log(`✅ Successfully removed song from Firestore`);
-    return true;
-  } catch (error: any) {
-    if (__DEV__) {
-      console.error("❌ Error removing liked song from Firestore:", error);
-      console.error("Error code:", error?.code);
-      console.error("Error message:", error?.message);
-    }
-    return false;
+
+    return likedSongs;
+  } catch (error) {
+    return [];
   }
 }
 
-export async function getUserProfile(userId: string): Promise<{ fullName: string; imageUrl: string; email: string } | null> {
+// Get playlist by ID
+export async function getPlaylistById(playlistId: string): Promise<FirestorePlaylist | null> {
   try {
-    const docSnap = await getDoc(doc(db, "users", userId));
-    if (!docSnap.exists()) return null;
-    const data = docSnap.data();
-    return {
-      fullName: data.fullName || data.displayName || "",
-      imageUrl: data.imageUrl || data.photoURL || "",
-      email: data.email || "",
-    };
+    if (!db) {
+      return null;
+    }
+
+    const playlistRef = doc(db, "playlists", playlistId);
+    const docSnap = await getDoc(playlistRef);
+
+    if (!docSnap.exists()) {
+      return null;
+    }
+
+    return { id: docSnap.id, ...docSnap.data() } as FirestorePlaylist;
   } catch (error) {
-    if (__DEV__) console.error("Error fetching user profile:", error);
     return null;
   }
 }
 
-export function firestorePlaylistToLocalSongs(playlist: FirestorePlaylist): Song[] {
-  return playlist.songs.map(firestoreSongToSong);
+// Convert Firestore playlist to local songs format
+export function firestorePlaylistToLocalSongs(playlist: FirestorePlaylist): any[] {
+  if (!playlist || !playlist.songs) return [];
+
+  return playlist.songs.map((song: any) => ({
+    id: song.id || song.songId || "",
+    title: song.title || song.name || "",
+    artist: song.artist || song.artists || "",
+    coverUrl: song.coverUrl || song.image || song.imageUrl || "",
+    audioUrl: song.audioUrl || song.url || "",
+    duration: song.duration || 0,
+    album: song.album || "",
+  }));
+}
+
+// Add liked song to Firestore (matches web app exactly)
+export async function addLikedSongToFirestore(userId: string, song: any): Promise<boolean> {
+  try {
+    if (!db) {
+      return false;
+    }
+
+    const documentId = song.id;
+    const songDocRef = doc(db, "users", userId, "likedSongs", documentId);
+
+    const docSnap = await getDoc(songDocRef);
+    if (docSnap.exists()) {
+      return true;
+    }
+
+    await setDoc(songDocRef, {
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      albumName: song.album || "",
+      imageUrl: song.coverUrl,
+      audioUrl: song.audioUrl,
+      duration: song.duration || 0,
+      year: "",
+      likedAt: serverTimestamp(),
+      source: "mavrixfy",
+    });
+
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Remove liked song from Firestore (matches web implementation)
+export async function removeLikedSongFromFirestore(userId: string, songId: string): Promise<boolean> {
+  try {
+    if (!db) {
+      return false;
+    }
+
+    const songDocRef = doc(db, "users", userId, "likedSongs", songId);
+
+    const docSnap = await getDoc(songDocRef);
+    if (!docSnap.exists()) {
+      const likedSongsRef = collection(db, "users", userId, "likedSongs");
+      const snapshot = await getDocs(likedSongsRef);
+
+      let foundDocId = null;
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        if (doc.id === songId || data.id === songId) {
+          foundDocId = doc.id;
+        }
+      });
+
+      if (foundDocId && foundDocId !== songId) {
+        const correctRef = doc(db, "users", userId, "likedSongs", foundDocId);
+        await deleteDoc(correctRef);
+        return true;
+      } else {
+        return false;
+      }
+    } else {
+      await deleteDoc(songDocRef);
+      return true;
+    }
+  } catch (error) {
+    return false;
+  }
 }

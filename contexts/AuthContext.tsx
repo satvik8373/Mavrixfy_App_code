@@ -12,6 +12,7 @@ import {
 } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { logLogin, logSignUp } from "@/lib/analytics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
@@ -101,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFirebaseUser(cred.user);
     setIsGuest(false);
     await AsyncStorage.removeItem(GUEST_KEY);
+    logLogin("email");
   }, [buildAppUser]);
 
   const register = useCallback(async (email: string, password: string, fullName: string) => {
@@ -122,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFirebaseUser(cred.user);
     setIsGuest(false);
     await AsyncStorage.removeItem(GUEST_KEY);
+    logSignUp("email");
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
@@ -139,6 +142,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           uid: fbUser.uid,
           createdAt: new Date().toISOString(),
         });
+        logSignUp("google");
+      } else {
+        logLogin("google");
       }
       const appUser = await buildAppUser(fbUser);
       setUser(appUser);
@@ -164,6 +170,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         uid: fbUser.uid,
         createdAt: new Date().toISOString(),
       });
+      logSignUp("google");
+    } else {
+      logLogin("google");
     }
     const appUser = await buildAppUser(fbUser);
     setUser(appUser);

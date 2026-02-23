@@ -1,60 +1,107 @@
 {
   "cli": {
-    "version": ">= 13.2.0"
+    "version": ">= 13.2.0",
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "gradleCommand": ":app:assembleDebug"
-      },
-      "ios": {
-        "simulator": true
-      },
-      "channel": "development"
+      "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk",
-        "cache": {
-          "key": "mavrixfy-preview-cache"
-        }
-      },
-      "ios": {
-        "simulator": false
-      },
-      "channel": "preview"
+      "distribution": "internal"
     },
     "production": {
       "android": {
         "buildType": "apk",
-        "cache": {
-          "key": "mavrixfy-production-cache",
-          "paths": ["node_modules", ".expo"]
-        }
+        "gradleCommand": ":app:assembleRelease"
       },
-      "ios": {},
-      "channel": "production"
+      "channel": "production",
+      "autoIncrement": false,
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1",
+        "EAS_NO_VCS": "1"
+      }
+    },
+    "production-optimized": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "channel": "production",
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1",
+        "EXPO_NO_FLIPPER": "1",
+        "EXPO_NO_CLIENT_SIDE_ENV": "1"
+      }
     },
     "production-aab": {
       "android": {
-        "buildType": "app-bundle",
-        "cache": {
-          "key": "mavrixfy-aab-cache"
-        }
+        "buildType": "app-bundle"
       },
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1",
+        "EXPO_NO_FLIPPER": "1",
+        "EXPO_NO_CLIENT_SIDE_ENV": "1"
+      }
+    },
+    "production-arm64": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "channel": "production",
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_NO_DOTENV": "1"
+      }
+    },
+    "production-ultra-small": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease",
+        "image": "latest"
+      },
+      "channel": "production",
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_NO_DOTENV": "1",
+        "EXPO_NO_CLIENT_SIDE_ENV": "1",
+        "EXPO_NO_FLIPPER": "1"
+      }
+    },
+    "production-universal": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1",
+        "EXPO_NO_FLIPPER": "1"
+      }
+    },
+    "production-split": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1",
+        "EXPO_NO_FLIPPER": "1"
+      }
     }
   },
   "submit": {
-    "production": {
-      "ios": {
-        "appleId": "your-apple-id@example.com",
-        "ascAppId": "your-app-store-connect-app-id",
-        "appleTeamId": "your-apple-team-id"
-      }
-    }
+    "production": {}
   }
 }

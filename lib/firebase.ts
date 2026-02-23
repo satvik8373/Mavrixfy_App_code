@@ -1,7 +1,10 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, initializeAuth, getReactNativePersistence } from "firebase/auth";
+import { getAuth, initializeAuth } from "firebase/auth";
+// @ts-ignore - Firebase v12 typings sometimes miss this export depending on tsconfig resolution
+import { getReactNativePersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getAnalytics, isSupported } from "firebase/analytics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
@@ -17,9 +20,9 @@ const firebaseConfig = {
   measurementId: Constants.expoConfig?.extra?.firebaseMeasurementId || process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-// Validate Firebase config (only in development)
-if (__DEV__ && (!firebaseConfig.apiKey || !firebaseConfig.projectId)) {
-  console.error("Firebase configuration is missing. Please check your environment variables or app.json extra config.");
+// Validate Firebase config
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+  // Silent fail - Firebase will handle gracefully
 }
 
 const app = initializeApp(firebaseConfig);
@@ -27,10 +30,21 @@ const app = initializeApp(firebaseConfig);
 export const auth = Platform.OS === "web"
   ? getAuth(app)
   : initializeAuth(app, {
-      persistence: getReactNativePersistence(AsyncStorage),
-    });
+    persistence: getReactNativePersistence(AsyncStorage),
+  });
 
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
+// Initialize Analytics (only supported on web)
+let analytics: ReturnType<typeof getAnalytics> | null = null;
+if (Platform.OS === "web") {
+  try {
+    analytics = getAnalytics(app);
+  } catch (error) {
+    // Silent fail
+  }
+}
+
+export { analytics };
 export default app;

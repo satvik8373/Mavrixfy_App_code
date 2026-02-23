@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useEffect, useRef, memo } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Dimensions,
   Platform,
   ActivityIndicator,
+  Animated,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -14,13 +15,70 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeInDown } from "react-native-reanimated";
 import Colors from "@/constants/colors";
+import { safeGoBack } from "@/utils/navigation";
 import { usePlayer } from "@/contexts/PlayerContext";
 import { formatDuration } from "@/lib/musicData";
+import { extractDominantColor } from "@/lib/colorExtractor";
+import { PingPongScroll } from "@/components/PingPongScroll";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const ART_SIZE = Math.min(SCREEN_WIDTH - 48, 400);
+
+// Optimized play button component
+const PlayerPlayButton = memo(({ 
+  isPlaying, 
+  isLoading, 
+  onPress 
+}: { 
+  isPlaying: boolean; 
+  isLoading: boolean; 
+  onPress: () => void;
+}) => {
+  return (
+    <Pressable onPress={onPress} style={styles.playButton}>
+      {isLoading ? (
+        <ActivityIndicator size="large" color={Colors.black} />
+      ) : (
+        <Ionicons
+          name={isPlaying ? "pause" : "play"}
+          size={38}
+          color={Colors.black}
+          style={!isPlaying ? { marginLeft: 4 } : undefined}
+        />
+      )}
+    </Pressable>
+  );
+}, (prevProps, nextProps) => {
+  // Only re-render if isPlaying or isLoading changed
+  return prevProps.isPlaying === nextProps.isPlaying && 
+         prevProps.isLoading === nextProps.isLoading;
+});
+
+PlayerPlayButton.displayName = "PlayerPlayButton";
+
+// Helper function to adjust color brightness
+function adjustColorBrightness(hex: string, percent: number): string {
+  // Remove # if present
+  hex = hex.replace("#", "");
+  
+  // Convert to RGB
+  let r = parseInt(hex.substring(0, 2), 16);
+  let g = parseInt(hex.substring(2, 4), 16);
+  let b = parseInt(hex.substring(4, 6), 16);
+  
+  // Adjust brightness
+  r = Math.max(0, Math.min(255, r + (r * percent / 100)));
+  g = Math.max(0, Math.min(255, g + (g * percent / 100)));
+  b = Math.max(0, Math.min(255, b + (b * percent / 100)));
+  
+  // Convert back to hex
+  const rr = Math.round(r).toString(16).padStart(2, "0");
+  const gg = Math.round(g).toString(16).padStart(2, "0");
+  const bb = Math.round(b).toString(16).padStart(2, "0");
+  
+  return `#${rr}${gg}${bb}`;
+}
 
 export default function PlayerScreen() {
   const insets = useSafeAreaInsets();
@@ -41,9 +99,43 @@ export default function PlayerScreen() {
     toggleRepeat,
     toggleLike,
     isLiked,
+    albumColor,
+    textColor,
   } = usePlayer();
 
   const [isSeeking, setIsSeeking] = useState(false);
+  const [gradientColors, setGradientColors] = useState<[string, string, string, string, string]>([
+    "#0a0a0a",
+    "#1a1a2e",
+    "#16213e",
+    "#0f3460",
+    Colors.background,
+  ]);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Update gradient colors based on album color
+  useEffect(() => {
+    if (currentSong?.coverUrl && albumColor) {
+      // Create gradient from album color to dark background
+      const baseColor = albumColor;
+      const darkColor = Colors.background;
+      setGradientColors([
+        baseColor,
+        adjustColorBrightness(baseColor, -20),
+        adjustColorBrightness(baseColor, -40),
+        adjustColorBrightness(baseColor, -60),
+        darkColor,
+      ] as [string, string, string, string, string]);
+    }
+  }, [currentSong?.id, albumColor]);
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+  }, [currentSong?.id]);
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
@@ -58,7 +150,7 @@ export default function PlayerScreen() {
         <View style={styles.emptyState}>
           <Ionicons name="musical-notes-outline" size={64} color={Colors.inactive} />
           <Text style={styles.emptyText}>No song playing</Text>
-          <Pressable onPress={() => router.back()} style={styles.backBtnEmpty}>
+          <Pressable onPress={safeGoBack} style={styles.backBtnEmpty}>
             <Ionicons name="arrow-down" size={28} color={Colors.text} />
           </Pressable>
         </View>
@@ -79,12 +171,12 @@ export default function PlayerScreen() {
 
   return (
     <LinearGradient
-      colors={["#1a1a2e", "#16213e", "#0f3460", Colors.background]}
-      locations={[0, 0.3, 0.6, 1]}
+      colors={gradientColors}
+      locations={[0, 0.2, 0.4, 0.6, 1]}
       style={[styles.container, { paddingTop: topInset, paddingBottom: bottomInset + 8 }]}
     >
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={safeGoBack} hitSlop={12}>
           <Ionicons name="arrow-down" size={28} color={Colors.text} />
         </Pressable>
         <View style={styles.headerCenter}>
@@ -99,7 +191,7 @@ export default function PlayerScreen() {
       </View>
 
       <View style={styles.artContainer}>
-        <Animated.View entering={FadeInDown.duration(400).springify()}>
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
           <Image
             source={{ uri: currentSong.coverUrl }}
             style={[
@@ -115,17 +207,26 @@ export default function PlayerScreen() {
       <View style={styles.infoSection}>
         <View style={styles.songInfoRow}>
           <View style={styles.songInfo}>
-            <Text style={styles.songTitle} numberOfLines={1}>{currentSong.title}</Text>
-            <Text style={styles.songArtist} numberOfLines={1}>{currentSong.artist}</Text>
+            <PingPongScroll
+              text={currentSong.title}
+              style={styles.songTitle}
+              velocity={15}
+            />
+            <PingPongScroll
+              text={currentSong.artist}
+              style={styles.songArtist}
+              velocity={12}
+            />
           </View>
           <Pressable
             onPress={() => { haptic(); toggleLike(currentSong); }}
             hitSlop={10}
+            style={styles.likeButton}
           >
             <Ionicons
               name={liked ? "heart" : "heart-outline"}
-              size={26}
-              color={liked ? Colors.primary : Colors.subtext}
+              size={28}
+              color={liked ? "#1DB954" : Colors.subtext}
             />
           </Pressable>
         </View>
@@ -163,21 +264,11 @@ export default function PlayerScreen() {
           <Pressable onPress={() => { haptic(); prevSong(); }}>
             <Ionicons name="play-skip-back" size={28} color={Colors.text} />
           </Pressable>
-          <Pressable
+          <PlayerPlayButton 
+            isPlaying={isPlaying}
+            isLoading={isLoading}
             onPress={() => { haptic(); togglePlay(); }}
-            style={styles.playButton}
-          >
-            {isLoading ? (
-              <ActivityIndicator size="large" color={Colors.black} />
-            ) : (
-              <Ionicons
-                name={isPlaying ? "pause" : "play"}
-                size={38}
-                color={Colors.black}
-                style={!isPlaying ? { marginLeft: 4 } : undefined}
-              />
-            )}
-          </Pressable>
+          />
           <Pressable onPress={() => { haptic(); nextSong(); }}>
             <Ionicons name="play-skip-forward" size={28} color={Colors.text} />
           </Pressable>
@@ -244,14 +335,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   albumArt: {
-    borderRadius: 8,
+    borderRadius: 16,
   },
   albumArtShadow: {
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 15,
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    elevation: 20,
   },
   infoSection: {
     paddingHorizontal: 24,
@@ -278,6 +369,9 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     marginTop: 4,
   },
+  likeButton: {
+    padding: 4,
+  },
   progressSection: {
     marginBottom: 16,
   },
@@ -292,17 +386,26 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: 4,
-    backgroundColor: Colors.text,
+    backgroundColor: Colors.primary,
     borderRadius: 2,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
   },
   progressDot: {
     position: "absolute",
     top: -5,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: Colors.text,
-    marginLeft: -6,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: Colors.primary,
+    marginLeft: -7,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 5,
   },
   timeRow: {
     flexDirection: "row",
@@ -322,12 +425,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   playButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: Colors.text,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
   repeatDot: {
     position: "absolute",
