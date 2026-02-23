@@ -84,7 +84,8 @@
               ]
             },
             "enableMinifyInReleaseBuilds": true,
-            "usesCleartextTraffic": false
+            "usesCleartextTraffic": false,
+            "abiFilters": ["armeabi-v7a"]
           }
         }
       ]

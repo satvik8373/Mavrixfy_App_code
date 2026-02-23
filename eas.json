@@ -24,6 +24,19 @@
         "EAS_NO_VCS": "1"
       }
     },
+    "production-arm": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease",
+        "enableProguardInReleaseBuilds": true,
+        "enableShrinkResourcesInReleaseBuilds": true
+      },
+      "channel": "production",
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1"
+      }
+    },
     "production-optimized": {
       "android": {
         "buildType": "apk",
