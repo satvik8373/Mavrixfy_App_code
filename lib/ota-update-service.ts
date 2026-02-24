@@ -66,7 +66,16 @@ class OTAUpdateService {
   private async initialize() {
     try {
       // Load current bundle version
-      const currentVersion = await AsyncStorage.getItem(BUNDLE_VERSION_KEY);
+      let currentVersion = await AsyncStorage.getItem(BUNDLE_VERSION_KEY);
+      
+      // If no OTA version is stored, initialize with app version
+      if (!currentVersion) {
+        const appVersion = Constants.expoConfig?.version || '1.2.0';
+        currentVersion = appVersion;
+        await AsyncStorage.setItem(BUNDLE_VERSION_KEY, appVersion);
+        console.log(`[OTA] Initialized OTA version to app version: ${appVersion}`);
+      }
+      
       this.status.currentVersion = currentVersion;
 
       // Start automatic update checks
@@ -138,9 +147,9 @@ class OTAUpdateService {
 
     try {
       const apiUrl = getAuthApiUrl();
-      const currentVersion = this.status.currentVersion || '0.0.0';
+      const appVersion = Constants.expoConfig?.version || '1.2.0';
+      const currentVersion = this.status.currentVersion || appVersion;
       const platform = Platform.OS as 'android' | 'ios';
-      const appVersion = Constants.expoConfig?.version || '1.0.0';
 
       console.log(`[OTA] ========================================`);
       console.log(`[OTA] Checking for updates...`);
