@@ -27,9 +27,7 @@
     "production-arm": {
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease",
-        "enableProguardInReleaseBuilds": true,
-        "enableShrinkResourcesInReleaseBuilds": true
+        "gradleCommand": ":app:assembleRelease"
       },
       "channel": "production",
       "env": {

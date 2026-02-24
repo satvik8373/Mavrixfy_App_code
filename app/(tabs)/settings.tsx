@@ -20,7 +20,6 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { safeGoBack } from "@/utils/navigation";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
-import { otaUpdateService } from "@/lib/ota-update-service";
 import {
   getSettings,
   saveSettings,
@@ -56,7 +55,6 @@ export default function SettingsScreen() {
   });
 
   const [activePreset, setActivePreset] = useState<string>("Flat");
-  const [otaVersion, setOtaVersion] = useState<string | null>(null);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -67,11 +65,6 @@ export default function SettingsScreen() {
       });
       if (match) setActivePreset(match);
       else setActivePreset("");
-    });
-
-    // Load OTA version
-    otaUpdateService.getCurrentVersion().then((version) => {
-      setOtaVersion(version);
     });
   }, []);
 
@@ -239,7 +232,7 @@ export default function SettingsScreen() {
           <View style={styles.aboutRow}>
             <Text style={styles.settingLabel}>Version</Text>
             <Text style={styles.settingValue}>
-              {otaVersion || Constants.expoConfig?.version || "1.2.0"}
+              {Constants.expoConfig?.version || "1.2.0"}
             </Text>
           </View>
           

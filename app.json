@@ -45,7 +45,9 @@
       ],
       "enableDangerousExperimentalLeanBuilds": true,
       "navigationBar": {
-        "backgroundColor": "#000000"
+        "backgroundColor": "#000000",
+        "barStyle": "light-content",
+        "visible": true
       }
     },
     "plugins": [
@@ -85,7 +87,7 @@
             },
             "enableMinifyInReleaseBuilds": true,
             "usesCleartextTraffic": false,
-            "abiFilters": ["armeabi-v7a"]
+            "abiFilters": ["armeabi-v7a", "arm64-v8a", "x86_64"]
           }
         }
       ]
