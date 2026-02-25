@@ -1,6 +1,6 @@
 workflows:
   expo-ios-workflow:
-    name: Expo iOS Build (No Mac Required)
+    name: Expo iOS Build
     max_build_duration: 120
     instance_type: mac_mini_m1
     environment:
@@ -10,43 +10,42 @@ workflows:
         script: |
           npm install -g eas-cli
           npm ci
-      - name: Build iOS IPA with EAS
+      - name: Debug Environment
         script: |
-          export EXPO_TOKEN=$EXPO_TOKEN
+          echo "=== Checking Environment ==="
+          echo "Node version: $(node --version)"
+          echo "NPM version: $(npm --version)"
+          echo "EAS CLI version: $(eas --version)"
+          echo ""
+          echo "Checking EXPO_TOKEN..."
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "❌ ERROR: EXPO_TOKEN is NOT set!"
+            echo ""
+            echo "To fix this:"
+            echo "1. Go to this workflow in Codemagic UI"
+            echo "2. Scroll to 'Environment variables' section"
+            echo "3. Add variable: EXPO_TOKEN"
+            echo "4. Paste your token from https://expo.dev/settings/access-tokens"
+            echo "5. Check 'Secure' checkbox"
+            echo "6. Click 'Add'"
+            exit 1
+          else
+            echo "✅ EXPO_TOKEN is set (length: ${#EXPO_TOKEN} characters)"
+          fi
+      - name: Authenticate with Expo
+        script: |
+          echo "Testing Expo authentication..."
           eas whoami
+      - name: Build iOS IPA
+        script: |
+          echo "Starting iOS build..."
           eas build --platform ios --profile production --non-interactive
     artifacts:
       - "*.ipa"
     publishing:
       email:
         recipients:
-          - your-email@example.com  # Change this to your email
-        notify:
-          success: true
-          failure: true
-
-  expo-ios-preview:
-    name: Expo iOS Preview Build
-    max_build_duration: 120
-    instance_type: mac_mini_m1
-    environment:
-      node: 20.19.4
-    scripts:
-      - name: Install dependencies
-        script: |
-          npm install -g eas-cli
-          npm ci
-      - name: Build iOS Preview
-        script: |
-          export EXPO_TOKEN=$EXPO_TOKEN
-          eas whoami
-          eas build --platform ios --profile preview --non-interactive
-    artifacts:
-      - "*.ipa"
-    publishing:
-      email:
-        recipients:
-          - your-email@example.com
+          - satvikpatel8373@gmail.com
         notify:
           success: true
           failure: true
