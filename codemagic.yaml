@@ -10,9 +10,6 @@ workflows:
         script: |
           npm install -g eas-cli
           npm ci
-      - name: Authenticate with Expo
-        script: |
-          eas login --non-interactive
       - name: Build iOS IPA with EAS
         script: |
           eas build --platform ios --profile production --non-interactive
