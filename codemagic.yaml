@@ -4,7 +4,7 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m1
     environment:
-      node: 18.18.0
+      node: 20.19.4
     scripts:
       - name: Install dependencies
         script: |
@@ -12,6 +12,8 @@ workflows:
           npm ci
       - name: Build iOS IPA with EAS
         script: |
+          export EXPO_TOKEN=$EXPO_TOKEN
+          eas whoami
           eas build --platform ios --profile production --non-interactive
     artifacts:
       - "*.ipa"
@@ -28,7 +30,7 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m1
     environment:
-      node: 18.18.0
+      node: 20.19.4
     scripts:
       - name: Install dependencies
         script: |
@@ -36,6 +38,8 @@ workflows:
           npm ci
       - name: Build iOS Preview
         script: |
+          export EXPO_TOKEN=$EXPO_TOKEN
+          eas whoami
           eas build --platform ios --profile preview --non-interactive
     artifacts:
       - "*.ipa"
