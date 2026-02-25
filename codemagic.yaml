@@ -4,9 +4,6 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m1
     environment:
-      vars:
-        # Get your Expo token from: https://expo.dev/accounts/[account]/settings/access-tokens
-        EXPO_TOKEN: Encrypted(...)  # Replace with your encrypted token
       node: 18.18.0
     scripts:
       - name: Install dependencies
@@ -34,8 +31,6 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m1
     environment:
-      vars:
-        EXPO_TOKEN: Encrypted(...)
       node: 18.18.0
     scripts:
       - name: Install dependencies

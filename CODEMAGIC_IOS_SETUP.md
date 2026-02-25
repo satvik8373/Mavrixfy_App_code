@@ -32,15 +32,17 @@ git commit -m "Add Codemagic iOS build configuration"
 git push
 ```
 
-### 4. Configure Codemagic
+### 4. Configure Codemagic Environment Variables
 1. Go to https://codemagic.io/apps
-2. Click "Add application"
-3. Select your repository
-4. Codemagic will detect `codemagic.yaml` automatically
-5. Go to Environment variables:
-   - Add variable: `EXPO_TOKEN`
-   - Paste your Expo token from step 2
-   - Mark it as "Secure" ✓
+2. Select your app
+3. Click on the workflow (expo-ios-workflow)
+4. Go to "Environment variables" section
+5. Click "Add variable":
+   - Variable name: `EXPO_TOKEN`
+   - Variable value: Paste your Expo token from step 2
+   - Group: Leave empty or create "expo"
+   - Check "Secure" ✓ (this encrypts it properly)
+6. Save the variable
 
 ### 5. Start Your First Build
 1. In Codemagic dashboard, select your app
@@ -91,6 +93,14 @@ You cannot:
 ---
 
 ## Troubleshooting
+
+### Build Fails - "Invalid encryption key"
+The `EXPO_TOKEN` must be added through Codemagic UI, not in the YAML file:
+1. In Codemagic, go to your app
+2. Click the workflow name
+3. Scroll to "Environment variables"
+4. Add `EXPO_TOKEN` there with "Secure" checked
+5. Don't put it in codemagic.yaml file
 
 ### Build Fails - "No provisioning profile"
 You need to set up iOS signing in Codemagic:
