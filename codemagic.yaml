@@ -40,8 +40,8 @@ workflows:
           eas whoami
       - name: Build iOS IPA
         script: |
-          echo "Starting iOS build..."
-          eas build --platform ios --profile production --non-interactive
+          echo "Building for iOS Simulator (no Apple Developer account needed)..."
+          eas build --platform ios --profile ios-simulator --non-interactive
     artifacts:
       - "*.ipa"
     publishing:
