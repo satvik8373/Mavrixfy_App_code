@@ -1,5 +1,4 @@
 import { Innertube, Platform, UniversalCache } from "youtubei.js";
-import vm from "node:vm";
 
 let youtubePromise = null;
 let evaluatorInstalled = false;
@@ -8,9 +7,8 @@ function installJavascriptEvaluator() {
   if (evaluatorInstalled) return;
 
   Platform.shim.eval = async (data, env) => {
-    const script = new vm.Script(`(function(env){ ${data.output} })`);
-    const fn = script.runInNewContext({});
-    return fn(env);
+    const evaluatePlayerScript = new Function("env", data.output);
+    return evaluatePlayerScript(env);
   };
 
   evaluatorInstalled = true;
