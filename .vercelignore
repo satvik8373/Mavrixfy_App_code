@@ -4,3 +4,8 @@
 # Allow the youtube-music-api folder and its contents
 !youtube-music-api/**
 !youtube-music-api
+
+# Allow the backend folder and its contents
+!backend/**
+!backend
+
