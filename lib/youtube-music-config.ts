@@ -3,7 +3,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { logger } from "@/lib/logger";
 
-export const PRODUCTION_YOUTUBE_MUSIC_API_URL = 'https://mavrixfy-api-drab.vercel.app/api/youtube-music';
+export const PRODUCTION_YOUTUBE_MUSIC_API_URL = 'https://mavrixfy-ytmusic-api.vercel.app';
 
 /**
  * YouTube Music API Configuration

@@ -162,7 +162,7 @@
     "runtimeVersion": "2.6.0-20601",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
-      "youtubeMusicApiUrl": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
+      "youtubeMusicApiUrl": "https://mavrixfy-ytmusic-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
       "firebaseAuthDomain": "spotify-8fefc.firebaseapp.com",
       "firebaseProjectId": "spotify-8fefc",
