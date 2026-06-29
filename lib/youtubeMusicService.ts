@@ -413,6 +413,40 @@ async function fetchFirstJson<T>(urls: string[], signal?: AbortSignal): Promise<
   return null;
 }
 
+/**
+ * Like fetchFirstJson, but also skips responses that fail the validator.
+ * Useful for playlist/album endpoints where the dev server may return HTTP 200
+ * with an empty tracks array — we want to fall through to the next (production) URL.
+ */
+async function fetchFirstJsonValidated<T>(
+  urls: string[],
+  isValid: (result: T) => boolean,
+  signal?: AbortSignal
+): Promise<T | null> {
+  if (signal?.aborted) throw new Error("Request aborted");
+
+  let lastError: unknown = null;
+  let bestResult: T | null = null;
+
+  for (const url of urls) {
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
+      const result = await fetchJson<T>(url, signal);
+      if (result === null) continue;
+      if (isValid(result)) return result; // Perfect — use it immediately
+      // Non-null but failed validation (e.g. empty tracks) — keep as fallback
+      if (bestResult === null) bestResult = result;
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) throw error;
+    }
+  }
+
+  if (lastError && bestResult === null) throw lastError;
+  // Return best partial result if all endpoints returned invalid data
+  return bestResult;
+}
+
 async function fetchFirstJsonSequential<T>(urls: string[], signal?: AbortSignal): Promise<T | null> {
   return fetchFirstJson<T>(urls, signal);
 }
@@ -866,11 +900,13 @@ export async function getYouTubeMusicPlaylist(playlistId: string): Promise<YouTu
   if (cached && Array.isArray(cached.tracks) && cached.tracks.length > 0) return cached;
 
   try {
-    const json = await fetchFirstJson<any>(
+    const json = await fetchFirstJsonValidated<any>(
       getEndpointCandidates(
         `/playlist/${encodeURIComponent(playlistId)}`,
         `/playlist/${encodeURIComponent(playlistId)}`
-      )
+      ),
+      // Only accept responses that actually contain tracks
+      (result) => Array.isArray(result?.tracks) && result.tracks.length > 0,
     );
     if (!json) return null;
     const playlist = normalizePlaylistPayload(getResponsePayload(json, "playlist"), playlistId);
@@ -922,11 +958,13 @@ export async function getYouTubeMusicAlbum(albumId: string): Promise<YouTubeMusi
   if (cached && Array.isArray(cached.tracks) && cached.tracks.length > 0) return cached;
 
   try {
-    const json = await fetchFirstJson<any>(
+    const json = await fetchFirstJsonValidated<any>(
       getEndpointCandidates(
         `/album/${encodeURIComponent(albumId)}`,
         `/album/${encodeURIComponent(albumId)}`
-      )
+      ),
+      // Only accept responses that actually contain tracks
+      (result) => Array.isArray(result?.tracks) && result.tracks.length > 0,
     );
     if (!json) return null;
     const album = normalizeAlbumPayload(getResponsePayload(json, "album"), albumId);

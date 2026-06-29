@@ -604,11 +604,32 @@ router.get("/song/:videoId", asyncRoute(async (req, res) => {
 }));
 
 router.get("/playlist/:playlistId", asyncRoute(async (req, res) => {
-  const playlistId = text(req.params.playlistId);
+  let playlistId = text(req.params.playlistId);
   if (!playlistId) throw httpError(400, "Missing playlist ID");
+
+  // Innertube requires the "VL" prefix for featured/auto-generated playlists
+  // (RDCLAK*, RDTMAK*) and community playlists (PL*) when using the browse API.
+  // Without it, YouTube returns an empty playlist with no contents.
+  const needsVL =
+    playlistId.startsWith("RDCLAK") ||
+    playlistId.startsWith("RDTMAK") ||
+    playlistId.startsWith("PL");
+  if (needsVL) {
+    playlistId = "VL" + playlistId;
+  }
+
   const yt = await getYoutube();
   const playlist = await yt.music.getPlaylist(playlistId);
-  res.json(normalizePlaylist(playlist, playlistId));
+  const normalized = normalizePlaylist(playlist, playlistId);
+
+  // If no tracks were resolved, return 404 so the frontend
+  // fetchFirstJsonValidated can fall through to the next candidate
+  // instead of caching an empty response.
+  if (!normalized.tracks || normalized.tracks.length === 0) {
+    throw httpError(404, `No tracks found for playlist ${playlistId}`);
+  }
+
+  res.json(normalized);
 }));
 
 router.get("/album/:albumId", asyncRoute(async (req, res) => {
