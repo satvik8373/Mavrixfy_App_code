@@ -63,6 +63,7 @@ import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistServ
 import {
   clearYouTubeMusicCache,
   getHomeYouTubeMusicCategories,
+  getYouTubeMusicLatestIndiaSongs,
   getYouTubeMusicTrendingPlaylists,
   YouTubeMusicHomeCategoryData,
   YouTubeMusicPlaylistCard,
@@ -116,10 +117,12 @@ type HomeCategoryData = {
 
 type HomeSessionCache = {
   hydrated: boolean;
+  dailyFeedKey: string;
   categories: HomeCategoryData[];
   publicPlaylists: FirestorePlaylist[];
   recentlyPlayed: RecentlyPlayedItem[];
   featuredArtists: ArtistCard[];
+  youtubeLatestSongs: Song[];
   newReleaseSongs: Song[];
   youtubeTrending: YouTubeMusicPlaylistCard[];
 };
@@ -128,48 +131,40 @@ type HomeFeedState = "ready" | "empty" | "network";
 
 const HOME_SESSION_CACHE: HomeSessionCache = {
   hydrated: false,
+  dailyFeedKey: getHomeDailyFeedKey(),
   categories: [],
   publicPlaylists: [],
   recentlyPlayed: [],
   featuredArtists: [],
+  youtubeLatestSongs: [],
   newReleaseSongs: [],
   youtubeTrending: [],
 };
 
+// Simplified category order - no filters
 const HOME_CATEGORY_SECTION_ORDER = [
   "trending",
   "top-charts",
   "new-releases",
-  "ranked",
-  "viral-hits",
-  "hot-right-now",
   "bollywood",
-  "popular",
-  "new-arrivals",
-  "most-viral",
+  "romance",
   "party-mix",
   "chill-vibes",
-  "romance",
   "workout",
   "retro",
 ] as const;
 
+// Simple titles without filters
 const HOME_JIOSAAVN_TITLES: Record<string, string> = {
   trending:       "Trending Now",
   "top-charts":   "Top Charts",
   "new-releases": "New Releases",
-  ranked:         "Top Ranked",
-  "viral-hits":   "Viral Hits",
-  "hot-right-now": "Hot Right Now",
-  bollywood:      "Bollywood Hits",
-  popular:        "Most Popular",
-  "new-arrivals": "New Songs",
-  "most-viral":   "Viral Hits",
-  "party-mix":    "Party Mix",
-  "chill-vibes":  "Chill Vibes",
-  romance:        "Love & Romance",
-  workout:        "Workout & Energy",
-  retro:          "Retro Classics",
+  bollywood:      "Bollywood",
+  romance:        "Romance",
+  "party-mix":    "Party",
+  "chill-vibes":  "Chill",
+  workout:        "Workout",
+  retro:          "Retro",
 };
 
 const BRAND = {
@@ -187,31 +182,20 @@ const BRAND = {
   textMuted: "rgba(188,203,185,0.76)",
 };
 
-const MIN_PUBLIC_PLAYLIST_ITEMS = 1;
-const PUBLIC_PLAYLIST_FETCH_TIMEOUT_MS = 4500;
-const HOME_CATEGORY_FETCH_TIMEOUT_MS = 12000;
-const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
-const HOME_NEW_RELEASE_SONG_TIMEOUT_MS = 8000;
-const MAX_ROW_ITEMS = 10;
-const NEW_RELEASE_SONG_LIMIT = 10;
-const HOME_DEFAULT_BROWSE_CATEGORY_IDS = ["trending", "top-charts", "new-releases", "bollywood"] as const;
+// Simplified limits - show all content
+const MAX_ROW_ITEMS = 20;
+const HOME_CATEGORY_FETCH_TIMEOUT_MS = 15000;
 const HOME_BROWSE_CATEGORY_FETCH_IDS = [
   "trending",
   "top-charts",
   "new-releases",
   "bollywood",
+  "romance",
   "party-mix",
   "chill-vibes",
-  "romance",
   "workout",
   "retro",
 ] as const;
-const HOME_MAX_DEFAULT_BROWSE_SECTIONS = 4;
-const HOME_MAX_MOOD_BROWSE_SECTIONS = 3;
-const HOME_MAX_RECOMMENDATION_SECTIONS = 2;
-const HOME_MAX_PUBLIC_PLAYLISTS = 12;
-const HOME_MAX_YOUTUBE_DISCOVERY_PLAYLISTS = 8;
-const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
 const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
 const QUICK_PICK_PLACEHOLDER_COLUMNS = [0, 1];
 const MOOD_CHIPS = ["Podcasts", "Energize", "Feel good", "Romance", "Workout", "Relax"];
@@ -238,24 +222,22 @@ const HOME_VERTICAL_INITIAL_RENDER_COUNT = 3;
 const HOME_VERTICAL_MAX_RENDER_BATCH = 2;
 const HOME_VERTICAL_WINDOW_SIZE = 5;
 
+// Simple content check - no filters
 function hasHomeContent(source: {
   categories: HomeCategoryData[];
-  publicPlaylists: FirestorePlaylist[];
   recentlyPlayed: RecentlyPlayedItem[];
-  newReleaseSongs: Song[];
-  youtubeTrending?: YouTubeMusicPlaylistCard[];
+  youtubeLatestSongs?: Song[];
 }): boolean {
   return (
     source.recentlyPlayed.length > 0 ||
-    source.newReleaseSongs.length > 0 ||
-    source.categories.length > 0 ||
-    source.publicPlaylists.length > 0 ||
-    Boolean(source.youtubeTrending && source.youtubeTrending.length > 0)
+    Boolean(source.youtubeLatestSongs && source.youtubeLatestSongs.length > 0) ||
+    source.categories.length > 0
   );
 }
 
+// Simple visibility check
 function hasVisibleHomeSections(source: HomeSessionCache): boolean {
-  return hasHomeContent(source) || source.featuredArtists.length > 0;
+  return hasHomeContent(source);
 }
 
 function isRecentYouTubeSong(song: Partial<Song>): boolean {
@@ -302,6 +284,7 @@ function normalizeId(value: unknown): string {
   return value.trim();
 }
 
+// Simple deduplication by ID only
 function dedupeHomeCategoryItemsBySource(
   items: HomeCategoryItem[],
   limit: number
@@ -311,10 +294,8 @@ function dedupeHomeCategoryItemsBySource(
 
   for (const item of items) {
     const id = normalizeId(item?.id);
-    const source = item?.source || "jiosaavn";
-    const key = `${source}:${id}`;
-    if (!id || seen.has(key)) continue;
-    seen.add(key);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
     unique.push(item);
     if (unique.length >= limit) break;
   }
@@ -334,6 +315,16 @@ function getQuickPickRotationSeed(): number {
   const now = new Date();
   const daySeed = Math.floor(now.getTime() / 86_400_000);
   return daySeed * 4 + Math.floor(now.getHours() / 6);
+}
+
+function getHomeDailyFeedKey(date: Date = new Date()): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function isHomeSessionFreshForToday(): boolean {
+  return HOME_SESSION_CACHE.dailyFeedKey === getHomeDailyFeedKey();
 }
 
 function getQuickPickSongs(songs: Song[], seed: number): Song[] {
@@ -359,6 +350,36 @@ function getQuickPickSongs(songs: Song[], seed: number): Song[] {
   ];
 }
 
+function getHomeSongDedupeKey(song: Song): string {
+  const titleArtist = `${song.title} ${song.artist}`
+    .toLowerCase()
+    .replace(/&amp;/g, "&")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return titleArtist || `${song.source || "song"}:${song.id}`;
+}
+
+function mergeYouTubeFirstSongs(
+  youtubeSongs: Song[],
+  fallbackSongs: Song[],
+  limit: number
+): Song[] {
+  const seen = new Set<string>();
+  const merged: Song[] = [];
+
+  const append = (song: Song | undefined) => {
+    if (!song || merged.length >= limit) return;
+    const key = getHomeSongDedupeKey(song);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    merged.push(song);
+  };
+
+  youtubeSongs.forEach(append);
+  fallbackSongs.forEach(append);
+  return merged;
+}
+
 function toJioSaavnHomeCategoryItem(item: HomeJioSaavnCategoryData["results"][number]): HomeCategoryItem {
   return {
     id: item.id,
@@ -382,31 +403,72 @@ function toYouTubeHomeCategoryItem(item: YouTubeMusicPlaylistCard): HomeCategory
   };
 }
 
+// Simple merge - show all items from both sources
+function interleaveHomeCategoryItems(
+  jioItems: HomeCategoryItem[],
+  youtubeItems: HomeCategoryItem[],
+  limit: number
+): HomeCategoryItem[] {
+  const merged: HomeCategoryItem[] = [];
+  const seen = new Set<string>();
+
+  const append = (item: HomeCategoryItem | undefined) => {
+    if (!item || merged.length >= limit) return;
+    const id = normalizeId(item.id);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    merged.push(item);
+  };
+
+  // Add all YouTube items first
+  youtubeItems.forEach(append);
+  // Then add JioSaavn items
+  jioItems.forEach(append);
+
+  return merged;
+}
+
+// Simple merge categories - no complex filtering
 function mergeHomeCategorySources(
   jioCategories: HomeJioSaavnCategoryData[],
   youtubeCategories: YouTubeMusicHomeCategoryData[],
   limit: number
 ): HomeCategoryData[] {
-  // Map YouTube categories directly to pure YouTube rows
-  const youtubeRows: HomeCategoryData[] = youtubeCategories
-    .map((category) => {
-      const results = category.results.map(toYouTubeHomeCategoryItem).slice(0, limit);
-      return { id: category.id, title: category.title, results };
-    })
-    .filter((row) => row.results.length > 0);
+  const categories: HomeCategoryData[] = [];
+  const seen = new Set<string>();
 
-  // Map JioSaavn categories directly to pure JioSaavn rows
-  const jioRows: HomeCategoryData[] = jioCategories
-    .map((category) => {
-      const results = category.results.map(toJioSaavnHomeCategoryItem).slice(0, limit);
-      return { id: category.id, title: HOME_JIOSAAVN_TITLES[category.id] ?? category.title, results };
-    })
-    .filter((row) => row.results.length > 0);
+  // Add all YouTube categories
+  youtubeCategories.forEach((category) => {
+    if (seen.has(category.id)) return;
+    seen.add(category.id);
+    
+    const results = category.results.map(toYouTubeHomeCategoryItem).slice(0, limit);
+    if (results.length > 0) {
+      categories.push({
+        id: category.id,
+        title: HOME_JIOSAAVN_TITLES[category.id] ?? category.title,
+        results,
+      });
+    }
+  });
 
-  // Place all YouTube rows first, followed by JioSaavn rows to ensure YouTube dominancy
-  return [...youtubeRows, ...jioRows];
+  // Add all JioSaavn categories
+  jioCategories.forEach((category) => {
+    if (seen.has(category.id)) return;
+    seen.add(category.id);
+    
+    const results = category.results.map(toJioSaavnHomeCategoryItem).slice(0, limit);
+    if (results.length > 0) {
+      categories.push({
+        id: category.id,
+        title: HOME_JIOSAAVN_TITLES[category.id] ?? category.title,
+        results,
+      });
+    }
+  });
+
+  return categories;
 }
-
 
 function getJioSaavnPrefetchCategories(categories: HomeCategoryData[]): HomeJioSaavnCategoryData[] {
   return mapFilter(
@@ -457,6 +519,57 @@ function canonicalPlaylistKey(item: Pick<RecommendationItem, "contentId" | "titl
   return title ? `playlist:${title}` : `playlist:${item.source}:${item.contentId}`;
 }
 
+function normalizeHomePlaylistTitle(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&amp;/g, "&")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function getHomePlaylistDedupeKey(source: string, id: unknown, title: unknown): string {
+  const titleKey = normalizeHomePlaylistTitle(title);
+  if (titleKey) return `title:${titleKey}`;
+
+  const idKey = normalizeId(id);
+  return idKey ? `${source}:${idKey}` : "";
+}
+
+function dedupeHomeItemsAgainstSeen<T>(
+  items: T[],
+  seen: Set<string>,
+  getKey: (item: T) => string,
+  limit: number
+): T[] {
+  const unique: T[] = [];
+
+  for (const item of items) {
+    const key = getKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(item);
+    if (unique.length >= limit) break;
+  }
+
+  return unique;
+}
+
+function getHomeCategoryPlaylistKey(item: HomeCategoryItem): string {
+  return getHomePlaylistDedupeKey(item.source, item.id, item.name);
+}
+
+function getYouTubePlaylistKey(item: YouTubeMusicPlaylistCard): string {
+  return getHomePlaylistDedupeKey("youtube", item.id, item.name);
+}
+
+function getPublicPlaylistKey(item: FirestorePlaylist): string {
+  return getHomePlaylistDedupeKey("public", item.id, item.name);
+}
+
+function getRecommendationPlaylistKey(item: RecommendationItem): string {
+  return getHomePlaylistDedupeKey(item.source, item.contentId, item.title);
+}
+
 function dedupeRecommendationFeed(feed: RecommendationFeed | null): RecommendationFeed | null {
   if (!feed) return null;
   const shown = new Set<string>();
@@ -493,46 +606,29 @@ function withPromiseTimeout<T>(promise: Promise<T>, timeoutMs: number, message: 
   });
 }
 
+// Simple category fetching - no timeouts or complex error handling
 async function getHomeMixedCategories(options: {
   forceRefresh: boolean;
   limitPerCategory: number;
-  realtime: boolean;
   categoryIds?: string[];
-  youtubeTimeoutMs?: number;
 }): Promise<HomeCategoryData[]> {
-  const youtubeLimit = Math.max(3, Math.ceil(options.limitPerCategory / 2));
-  const jioPromise = getHomeJioSaavnCategories({
-    forceRefresh: options.forceRefresh,
-    limitPerCategory: options.limitPerCategory,
-    realtime: options.realtime,
-    categoryIds: options.categoryIds,
-  });
-  const youtubePromise = withPromiseTimeout(
+  const [jioResult, youtubeResult] = await Promise.allSettled([
+    getHomeJioSaavnCategories({
+      forceRefresh: options.forceRefresh,
+      limitPerCategory: options.limitPerCategory,
+      categoryIds: options.categoryIds,
+    }),
     getHomeYouTubeMusicCategories({
       forceRefresh: options.forceRefresh,
-      limitPerCategory: youtubeLimit,
+      limitPerCategory: options.limitPerCategory,
+      categoryIds: options.categoryIds,
     }),
-    options.youtubeTimeoutMs ?? 12000,
-    "Home YouTube Music categories timeout"
-  );
+  ]);
 
-  const [jioResult, youtubeResult] = await Promise.allSettled([jioPromise, youtubePromise]);
   const jioCategories = jioResult.status === "fulfilled" ? jioResult.value : [];
   const youtubeCategories = youtubeResult.status === "fulfilled" ? youtubeResult.value : [];
 
-  if (jioResult.status === "rejected") {
-    logger.warn("[Home] JioSaavn category fetch failed:", jioResult.reason);
-  }
-  if (youtubeResult.status === "rejected") {
-    logger.warn("[Home] YouTube Music category fetch failed:", youtubeResult.reason);
-  }
-
-  const merged = mergeHomeCategorySources(jioCategories, youtubeCategories, options.limitPerCategory);
-  if (merged.length === 0 && jioResult.status === "rejected" && youtubeResult.status === "rejected") {
-    throw new Error("Home music categories unavailable");
-  }
-
-  return merged;
+  return mergeHomeCategorySources(jioCategories, youtubeCategories, options.limitPerCategory);
 }
 
 function withCloudinaryHomeVideoTransform(url: string, transform: string, forceJpg = false): string {
@@ -1217,6 +1313,9 @@ function useHomeScreenInnerView() {
   const [featuredArtists, setFeaturedArtists] = useState<ArtistCard[]>(
     HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.featuredArtists : []
   );
+  const [youtubeLatestSongs, setYoutubeLatestSongs] = useState<Song[]>(
+    HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.youtubeLatestSongs : []
+  );
   const [newReleaseSongs, setNewReleaseSongs] = useState<Song[]>(
     HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.newReleaseSongs : []
   );
@@ -1260,17 +1359,17 @@ function useHomeScreenInnerView() {
     !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.publicPlaylists.length === 0
   );
   const [isLoadingNewReleaseSongs, setIsLoadingNewReleaseSongs] = useState(
-    !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.newReleaseSongs.length === 0
+    !HOME_SESSION_CACHE.hydrated &&
+      HOME_SESSION_CACHE.youtubeLatestSongs.length === 0 &&
+      HOME_SESSION_CACHE.newReleaseSongs.length === 0
   );
   const [recommendationFeed, setRecommendationFeed] = useState<RecommendationFeed | null>(null);
   const [isRecommendationFeedLoading, setIsRecommendationFeedLoading] = useState(false);
   const [hasRecommendationFeedFailed, setHasRecommendationFeedFailed] = useState(false);
   const latestLoadIdRef = useRef(0);
   const latestRecommendationLoadIdRef = useRef(0);
-  const quickPickRotationSeedRef = useRef<number | null>(null);
-  if (quickPickRotationSeedRef.current === null) {
-    quickPickRotationSeedRef.current = getQuickPickRotationSeed();
-  }
+  const [quickPickRotationSeed, setQuickPickRotationSeed] = useState<number>(getQuickPickRotationSeed);
+  const homeDailyFeedKeyRef = useRef(getHomeDailyFeedKey());
   const hasHydratedRef = useRef(HOME_SESSION_CACHE.hydrated);
   const prefetchStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelPlaylistPrefetchRef = useRef<(() => void) | null>(null);
@@ -1359,6 +1458,7 @@ function useHomeScreenInnerView() {
       const realtimeRefresh = options?.realtimeRefresh ?? false;
       const limitPerCategory = options?.limitPerCategory ?? INITIAL_CATEGORY_LIMIT;
       const publicLimit = options?.publicLimit ?? INITIAL_PUBLIC_LIMIT;
+      const dailyFeedKey = getHomeDailyFeedKey();
 
       const loadId = ++latestLoadIdRef.current;
       const shouldShowLoader = showLoader && !hasHydratedRef.current;
@@ -1372,7 +1472,10 @@ function useHomeScreenInnerView() {
       if (refreshPublicPlaylists && HOME_SESSION_CACHE.publicPlaylists.length === 0) {
         setIsLoadingPublicPlaylists(true);
       }
-      if (HOME_SESSION_CACHE.newReleaseSongs.length === 0) {
+      if (
+        HOME_SESSION_CACHE.youtubeLatestSongs.length === 0 &&
+        HOME_SESSION_CACHE.newReleaseSongs.length === 0
+      ) {
         setIsLoadingNewReleaseSongs(true);
       }
 
@@ -1405,9 +1508,17 @@ function useHomeScreenInnerView() {
           HOME_NEW_RELEASE_SONG_TIMEOUT_MS,
           "Home new release songs timeout"
         );
+        const youtubeLatestSongsPromise = withPromiseTimeout(
+          getYouTubeMusicLatestIndiaSongs({
+            forceRefresh,
+            limit: NEW_RELEASE_SONG_LIMIT,
+          }),
+          HOME_NEW_RELEASE_SONG_TIMEOUT_MS,
+          "Home YouTube latest songs timeout"
+        );
 
         const youtubeTrendingPromise = withPromiseTimeout(
-          getYouTubeMusicTrendingPlaylists("IN"),
+          getYouTubeMusicTrendingPlaylists("IN", { forceRefresh }),
           6000,
           "YouTube trending timeout"
         ).catch((err) => {
@@ -1484,6 +1595,28 @@ function useHomeScreenInnerView() {
           })
           .catch((reason) => ({ status: "rejected" as const, reason }));
 
+        const youtubeLatestSongsResultPromise = youtubeLatestSongsPromise
+          .then((songs) => {
+            if (loadId !== latestLoadIdRef.current) {
+              return { status: "fulfilled" as const, value: songs };
+            }
+
+            const hasPreviousSongs = HOME_SESSION_CACHE.youtubeLatestSongs.length > 0;
+            const shouldReplaceSongs = songs.length > 0 || !hasPreviousSongs;
+            if (shouldReplaceSongs) {
+              setYoutubeLatestSongs(songs);
+              HOME_SESSION_CACHE.youtubeLatestSongs = songs;
+            }
+
+            if (songs.length > 0) {
+              setIsLoadingNewReleaseSongs(false);
+              markReadyIfContentVisible();
+            }
+
+            return { status: "fulfilled" as const, value: songs };
+          })
+          .catch((reason) => ({ status: "rejected" as const, reason }));
+
         const applyCategorySnapshot = (categoryData: HomeCategoryData[]) => {
           const validCategories = categoryData.filter((cat) => cat.results.length > 0);
           const hasPreviousCategories = HOME_SESSION_CACHE.categories.length > 0;
@@ -1512,7 +1645,7 @@ function useHomeScreenInnerView() {
                 forceRefresh,
                 limitPerCategory: Math.min(limitPerCategory, 8),
                 realtime: realtimeRefresh,
-                categoryIds: [...HOME_DEFAULT_BROWSE_CATEGORY_IDS],
+                categoryIds: [...HOME_PRIMARY_BROWSE_CATEGORY_IDS],
                 youtubeTimeoutMs: 4800,
               }),
               HOME_PRIORITY_CATEGORY_TIMEOUT_MS,
@@ -1573,10 +1706,16 @@ function useHomeScreenInnerView() {
           })
           .catch((reason) => ({ status: "rejected" as const, reason }));
 
-        const [publicPlaylistsResult, categoryResult, newReleaseSongsResult] = await Promise.all([
+        const [
+          publicPlaylistsResult,
+          categoryResult,
+          newReleaseSongsResult,
+          youtubeLatestSongsResult,
+        ] = await Promise.all([
           publicPlaylistsResultPromise,
           categoryResultPromise,
           newReleaseSongsResultPromise,
+          youtubeLatestSongsResultPromise,
           youtubeTrendingResultPromise,
         ]);
 
@@ -1586,13 +1725,16 @@ function useHomeScreenInnerView() {
           if (hasVisibleHomeSections(HOME_SESSION_CACHE) || youtubeTrendingPlaylists.length > 0) {
             hasHydratedRef.current = true;
             HOME_SESSION_CACHE.hydrated = true;
+            HOME_SESSION_CACHE.dailyFeedKey = dailyFeedKey;
+            homeDailyFeedKeyRef.current = dailyFeedKey;
           }
 
           const nextFeedState = hasHomeContent(HOME_SESSION_CACHE) || youtubeTrendingPlaylists.length > 0
             ? "ready"
             : publicPlaylistsResult.status === "rejected" ||
                 categoryResult.status === "rejected" ||
-                newReleaseSongsResult.status === "rejected"
+                newReleaseSongsResult.status === "rejected" ||
+                youtubeLatestSongsResult.status === "rejected"
               ? "network"
               : "empty";
           setHomeFeedState(nextFeedState);
@@ -1601,6 +1743,8 @@ function useHomeScreenInnerView() {
           if (!HOME_SESSION_CACHE.hydrated) {
             HOME_SESSION_CACHE.hydrated = true;
             hasHydratedRef.current = true;
+            HOME_SESSION_CACHE.dailyFeedKey = dailyFeedKey;
+            homeDailyFeedKeyRef.current = dailyFeedKey;
           }
         }
       } finally {
@@ -1624,9 +1768,11 @@ function useHomeScreenInnerView() {
     invalidateLatestLoad();
     hasHydratedRef.current = false;
     HOME_SESSION_CACHE.hydrated = false;
+    HOME_SESSION_CACHE.dailyFeedKey = getHomeDailyFeedKey();
     HOME_SESSION_CACHE.categories = [];
     HOME_SESSION_CACHE.publicPlaylists = [];
     HOME_SESSION_CACHE.recentlyPlayed = [];
+    HOME_SESSION_CACHE.youtubeLatestSongs = [];
     HOME_SESSION_CACHE.newReleaseSongs = [];
     HOME_SESSION_CACHE.youtubeTrending = [];
 
@@ -1634,6 +1780,7 @@ function useHomeScreenInnerView() {
       setCategories([]);
       setPublicPlaylists([]);
       setRecentlyPlayed([]);
+      setYoutubeLatestSongs([]);
       setNewReleaseSongs([]);
       setYoutubeTrendingPlaylists([]);
       setLoading(true);
@@ -1648,6 +1795,7 @@ function useHomeScreenInnerView() {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    setQuickPickRotationSeed((prev) => prev + 1);
     try {
       resetHomeState();
       await Promise.all([
@@ -1681,18 +1829,23 @@ function useHomeScreenInnerView() {
     } finally {
       setRefreshing(false);
     }
-  }, [loadHomeData, loadRecommendationFeed, resetHomeState, shouldUseRecommendationFeed]);
+  }, [loadHomeData, loadRecommendationFeed, resetHomeState, shouldUseRecommendationFeed, setQuickPickRotationSeed]);
 
   const applyHomeCacheSnapshot = useCallback(() => {
+    homeDailyFeedKeyRef.current = HOME_SESSION_CACHE.dailyFeedKey || getHomeDailyFeedKey();
     setRecentlyPlayed(HOME_SESSION_CACHE.recentlyPlayed);
     setCategories(HOME_SESSION_CACHE.categories);
     setPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists);
     setFeaturedArtists(HOME_SESSION_CACHE.featuredArtists);
+    setYoutubeLatestSongs(HOME_SESSION_CACHE.youtubeLatestSongs);
     setNewReleaseSongs(HOME_SESSION_CACHE.newReleaseSongs);
     setYoutubeTrendingPlaylists(HOME_SESSION_CACHE.youtubeTrending);
     setIsLoadingCategories(HOME_SESSION_CACHE.categories.length === 0);
     setIsLoadingPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists.length === 0);
-    setIsLoadingNewReleaseSongs(HOME_SESSION_CACHE.newReleaseSongs.length === 0);
+    setIsLoadingNewReleaseSongs(
+      HOME_SESSION_CACHE.youtubeLatestSongs.length === 0 &&
+        HOME_SESSION_CACHE.newReleaseSongs.length === 0
+    );
     setIsLoadingYoutubeTrending(HOME_SESSION_CACHE.youtubeTrending.length === 0);
     setHomeFeedState(hasHomeContent(HOME_SESSION_CACHE) ? "ready" : "empty");
     const hasVisibleFeed =
@@ -1735,6 +1888,7 @@ function useHomeScreenInnerView() {
   const revealWarmHomeContent = useCallback(() => {
     hasHydratedRef.current = true;
     HOME_SESSION_CACHE.hydrated = true;
+    HOME_SESSION_CACHE.dailyFeedKey ||= getHomeDailyFeedKey();
     setLoading(false);
     setHomeFeedState("ready");
   }, []);
@@ -1751,8 +1905,9 @@ function useHomeScreenInnerView() {
 
     const bootstrap = async () => {
       if (HOME_SESSION_CACHE.hydrated) {
+        const hasFreshDailyFeed = isHomeSessionFreshForToday();
         const hasFullFeed = applyHomeCacheSnapshot();
-        if (hasFullFeed) return;
+        if (hasFullFeed && hasFreshDailyFeed) return;
         // Fall through to load missing data
       }
 
@@ -1775,9 +1930,10 @@ function useHomeScreenInnerView() {
       if (cancelled) return;
 
       try {
+        const shouldForceDailyRefresh = !isHomeSessionFreshForToday();
         await withPromiseTimeout(
           loadHomeData({
-            forceRefresh: false,
+            forceRefresh: shouldForceDailyRefresh,
             showLoader: !hasWarmContent,
             refreshPublicPlaylists: true,
             realtimeRefresh: false,
@@ -1808,6 +1964,38 @@ function useHomeScreenInnerView() {
     loadHomeData,
     revealWarmHomeContent,
   ]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state: AppStateStatus) => {
+      if (state !== "active") return;
+
+      const nextDailyKey = getHomeDailyFeedKey();
+      if (homeDailyFeedKeyRef.current === nextDailyKey && HOME_SESSION_CACHE.dailyFeedKey === nextDailyKey) {
+        return;
+      }
+
+      homeDailyFeedKeyRef.current = nextDailyKey;
+      HOME_SESSION_CACHE.dailyFeedKey = nextDailyKey;
+      setQuickPickRotationSeed(getQuickPickRotationSeed());
+
+      void loadHomeData({
+        forceRefresh: true,
+        showLoader: false,
+        refreshPublicPlaylists: true,
+        realtimeRefresh: false,
+        limitPerCategory: REFRESH_CATEGORY_LIMIT,
+        publicLimit: INITIAL_PUBLIC_LIMIT,
+      });
+
+      if (shouldUseRecommendationFeed) {
+        void loadRecommendationFeed({ forceRefresh: true });
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [loadHomeData, loadRecommendationFeed, shouldUseRecommendationFeed]);
 
   useEffect(() => {
     return cancelScheduledPlaylistPrefetch;
@@ -1862,40 +2050,108 @@ function useHomeScreenInnerView() {
       }), (cat) => cat.results.length > 0);
   }, [orderedHomeCategories]);
 
+  const rawPublicPlaylistsForSection = useMemo(
+    () => dedupeFirestorePlaylistsById(publicPlaylists, HOME_MAX_PUBLIC_PLAYLISTS * 2),
+    [publicPlaylists]
+  );
+
+  const rawRecommendationSections = useMemo(
+    () => recommendationFeed?.sections.filter((section) => section.items.length > 0).slice(0, HOME_MAX_RECOMMENDATION_SECTIONS) ?? [],
+    [recommendationFeed]
+  );
+
+  const rawYoutubeDiscoveryPlaylists = useMemo(
+    () => youtubeTrendingPlaylists.slice(0, HOME_MAX_YOUTUBE_DISCOVERY_PLAYLISTS * 2),
+    [youtubeTrendingPlaylists]
+  );
+
+  const dedupedHomeBlocks = useMemo(() => {
+    const seenPlaylistKeys = new Set<string>();
+
+    const youtubePlaylists = dedupeHomeItemsAgainstSeen(
+      rawYoutubeDiscoveryPlaylists,
+      seenPlaylistKeys,
+      getYouTubePlaylistKey,
+      HOME_MAX_YOUTUBE_DISCOVERY_PLAYLISTS
+    );
+
+    const categoryRows = mapFilter(
+      allCategoryRows,
+      (category) => {
+        const results = dedupeHomeItemsAgainstSeen(
+          category.results,
+          seenPlaylistKeys,
+          getHomeCategoryPlaylistKey,
+          MAX_ROW_ITEMS
+        );
+        return results.length > 0 ? { ...category, results } : null;
+      },
+      (category): category is HomeCategoryData => Boolean(category)
+    );
+
+    const recommendationRows = mapFilter(
+      rawRecommendationSections,
+      (section) => {
+        const items = dedupeHomeItemsAgainstSeen(
+          section.items,
+          seenPlaylistKeys,
+          getRecommendationPlaylistKey,
+          section.items.length
+        );
+        return items.length > 0 ? { ...section, items } : null;
+      },
+      (section): section is RecommendationSection => Boolean(section)
+    );
+
+    const publicPlaylistRows = dedupeHomeItemsAgainstSeen(
+      rawPublicPlaylistsForSection,
+      seenPlaylistKeys,
+      getPublicPlaylistKey,
+      HOME_MAX_PUBLIC_PLAYLISTS
+    );
+
+    return {
+      categoryRows,
+      publicPlaylists: publicPlaylistRows,
+      recommendationSections: recommendationRows,
+      youtubeDiscoveryPlaylists: youtubePlaylists,
+    };
+  }, [
+    allCategoryRows,
+    rawPublicPlaylistsForSection,
+    rawRecommendationSections,
+    rawYoutubeDiscoveryPlaylists,
+  ]);
+
+  const dedupedCategoryRows = dedupedHomeBlocks.categoryRows;
+
   const visibleBrowseCategoryRows = useMemo(() => {
     if (selectedMood) {
-      return allCategoryRows.slice(0, HOME_MAX_MOOD_BROWSE_SECTIONS);
+      return dedupedCategoryRows.slice(0, HOME_MAX_MOOD_BROWSE_SECTIONS);
     }
 
-    const rowById = new Map(allCategoryRows.map((cat) => [cat.id, cat]));
+    const rowById = new Map(dedupedCategoryRows.map((cat) => [cat.id, cat]));
     const preferred = mapFilter(
-      HOME_DEFAULT_BROWSE_CATEGORY_IDS,
+      [...HOME_PRIMARY_BROWSE_CATEGORY_IDS],
       (id) => rowById.get(id) ?? null,
       (cat): cat is HomeCategoryData => Boolean(cat)
     );
     const preferredIds = new Set(preferred.map((cat) => cat.id));
     const fallback = filterMap(
-      allCategoryRows,
+      dedupedCategoryRows,
       (cat) => !preferredIds.has(cat.id),
       (cat) => cat
     );
 
     return [...preferred, ...fallback].slice(0, HOME_MAX_DEFAULT_BROWSE_SECTIONS);
-  }, [allCategoryRows, selectedMood]);
+  }, [dedupedCategoryRows, selectedMood]);
 
-  const publicPlaylistsForSection = useMemo(
-    () => dedupeFirestorePlaylistsById(publicPlaylists, HOME_MAX_PUBLIC_PLAYLISTS),
-    [publicPlaylists]
-  );
-
-  const recommendationSections = useMemo(
-    () => recommendationFeed?.sections.filter((section) => section.items.length > 0).slice(0, HOME_MAX_RECOMMENDATION_SECTIONS) ?? [],
-    [recommendationFeed]
-  );
-
-  const youtubeDiscoveryPlaylists = useMemo(
-    () => youtubeTrendingPlaylists.slice(0, HOME_MAX_YOUTUBE_DISCOVERY_PLAYLISTS),
-    [youtubeTrendingPlaylists]
+  const publicPlaylistsForSection = dedupedHomeBlocks.publicPlaylists;
+  const recommendationSections = dedupedHomeBlocks.recommendationSections;
+  const youtubeDiscoveryPlaylists = dedupedHomeBlocks.youtubeDiscoveryPlaylists;
+  const homeQuickPickSongs = useMemo(
+    () => mergeYouTubeFirstSongs(youtubeLatestSongs, newReleaseSongs, 24),
+    [newReleaseSongs, youtubeLatestSongs]
   );
 
   const sections = useMemo<HomeSection[]>(() => {
@@ -1906,7 +2162,7 @@ function useHomeScreenInnerView() {
       });
 
       if (visibleBrowseCategoryRows.length === 0 && isLoadingCategories) {
-        HOME_DEFAULT_BROWSE_CATEGORY_IDS.slice(0, 2).forEach((priorityId) => {
+        HOME_PRIMARY_BROWSE_CATEGORY_IDS.slice(0, 2).forEach((priorityId) => {
           data.push({
             id: `category-loading-${priorityId}`,
             type: "category",
@@ -1924,7 +2180,7 @@ function useHomeScreenInnerView() {
       if (recentlyPlayed.length > 0) {
         data.push({ id: "recents", type: "recents" });
       }
-      if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
+      if (homeQuickPickSongs.length > 0 || isLoadingNewReleaseSongs) {
         data.push({ id: "new-release-songs", type: "new-release-songs" });
       }
       if (youtubeDiscoveryPlaylists.length > 0 || isLoadingYoutubeTrending) {
@@ -1960,16 +2216,16 @@ function useHomeScreenInnerView() {
     }
 
     // 2. Fresh songs and quick taps.
-    if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
+    if (homeQuickPickSongs.length > 0 || isLoadingNewReleaseSongs) {
       data.push({ id: "new-release-songs", type: "new-release-songs" });
     }
 
-    // 3. Video-backed discovery is separate from the main app catalog.
+    // 3. Video-backed discovery gets priority for a YouTube Music-like Home.
     if (youtubeDiscoveryPlaylists.length > 0 || isLoadingYoutubeTrending) {
       data.push({ id: "youtube-trending", type: "youtube-trending" });
     }
 
-    // 4. Browse: a small curated set, filtered by mood when selected.
+    // 4. Browse: stable official-style playlist shelves, filtered by mood when selected.
     appendCategorySections();
 
     // 5. Made for You and people discovery sit lower to keep the first screen calm.
@@ -1986,7 +2242,7 @@ function useHomeScreenInnerView() {
     publicPlaylistsForSection,
     featuredArtists,
     visibleBrowseCategoryRows,
-    newReleaseSongs.length,
+    homeQuickPickSongs.length,
     isLoadingNewReleaseSongs,
     youtubeDiscoveryPlaylists.length,
     isLoadingYoutubeTrending,
@@ -2094,8 +2350,11 @@ function useHomeScreenInnerView() {
   );
 
   const newReleaseSongQueue = useMemo(
-    () => newReleaseSongs.filter((song) => song.audioUrl.trim().length > 0),
-    [newReleaseSongs]
+    () =>
+      homeQuickPickSongs.filter(
+        (song) => song.audioUrl.trim().length > 0 || song.source === "youtube" || Boolean(song.youtubeVideoId)
+      ),
+    [homeQuickPickSongs]
   );
 
   const handleNewReleaseSongPress = useCallback(
@@ -2340,11 +2599,7 @@ function useHomeScreenInnerView() {
               recyclingKey={`${categoryId}-${item.id}`}
             />
             <View pointerEvents="none" style={styles.brandCoverBadge}>
-              {item.source === "youtube" ? (
-                <Ionicons name="logo-youtube" size={15} color="#FFFFFF" />
-              ) : (
-                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-              )}
+              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
             </View>
           </View>
           <Text style={styles.rectCardTitle} numberOfLines={2}>
@@ -2434,9 +2689,9 @@ function useHomeScreenInnerView() {
   );
 
   const quickPicksChunks = useMemo(() => {
-    const quickPickSongs = getQuickPickSongs(newReleaseSongs, quickPickRotationSeedRef.current ?? 0);
+    const quickPickSongs = getQuickPickSongs(homeQuickPickSongs, quickPickRotationSeed);
     return chunkArray(quickPickSongs, 4).filter((chunk) => chunk.length === 4);
-  }, [newReleaseSongs]);
+  }, [homeQuickPickSongs, quickPickRotationSeed]);
 
   const renderQuickPicksColumnSeparator = useCallback(() => <View style={{ width: 14 }} />, []);
 
@@ -2836,8 +3091,8 @@ function useHomeScreenInnerView() {
         case "new-release-songs":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("Quick Picks")}
-              {newReleaseSongs.length > 0 ? (
+              {getSectionHeaderElement("Latest India Picks")}
+              {homeQuickPickSongs.length > 0 ? (
                 <FlatList
                   horizontal
                   data={quickPicksChunks}
@@ -2868,7 +3123,7 @@ function useHomeScreenInnerView() {
         case "youtube-trending":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("YouTube Music videos")}
+              {getSectionHeaderElement("India Video Hits")}
               {youtubeDiscoveryPlaylists.length > 0 ? (
                 <FlatList
                   horizontal
@@ -3012,7 +3267,7 @@ function useHomeScreenInnerView() {
     [
       recentlyPlayed,
       renderRecentCard,
-      newReleaseSongs,
+      homeQuickPickSongs,
       quickPicksChunks,
       renderQuickPicksColumn,
       renderQuickPicksColumnSeparator,

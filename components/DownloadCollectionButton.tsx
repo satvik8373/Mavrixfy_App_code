@@ -22,6 +22,7 @@ import { useDownloadsSafe } from "@/contexts/DownloadContext";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
+import { canDownloadSongSource } from "@/lib/downloads/sourceGuards";
 
 // Average compressed audio file size per minute at high quality (~1.5 MB/min)
 const AVG_BYTES_PER_SECOND = 25_000; // ~200 kbps
@@ -95,14 +96,19 @@ export default function DownloadCollectionButton({
   compact = false,
 }: Props) {
   const ctx = useDownloadsSafe();
+  const downloadableSongs = useMemo(
+    () => songs.filter(canDownloadSongSource),
+    [songs]
+  );
+  const skippedYouTubeCount = songs.length - downloadableSongs.length;
 
   // Derive per-collection download state from the store
   const { completed, downloading, queued, total } = useMemo(() => {
-    if (!ctx || songs.length === 0) {
+    if (!ctx || downloadableSongs.length === 0) {
       return { completed: 0, downloading: 0, queued: 0, failed: 0, total: 0 };
     }
     let c = 0, d = 0, q = 0, f = 0;
-    for (const song of songs) {
+    for (const song of downloadableSongs) {
       const item = ctx.getDownload(song.id);
       if (!item) continue;
       if (item.status === "completed") c++;
@@ -114,8 +120,8 @@ export default function DownloadCollectionButton({
       ) q++;
       else if (item.status === "failed") f++;
     }
-    return { completed: c, downloading: d, queued: q, failed: f, total: songs.length };
-  }, [ctx, songs]);
+    return { completed: c, downloading: d, queued: q, failed: f, total: downloadableSongs.length };
+  }, [ctx, downloadableSongs]);
 
   const allDone = total > 0 && completed === total;
   const isActive = downloading > 0 || queued > 0;
@@ -137,7 +143,7 @@ export default function DownloadCollectionButton({
             text: "Remove All",
             style: "destructive",
             onPress: async () => {
-              await Promise.all(songs.map((song) => ctx.removeDownload(song.id, collectionId)));
+              await Promise.all(downloadableSongs.map((song) => ctx.removeDownload(song.id, collectionId)));
             },
           },
         ]
@@ -156,7 +162,7 @@ export default function DownloadCollectionButton({
           {
             text: "Pause All",
             onPress: async () => {
-              const pauseableSongs = songs.filter((song) => {
+              const pauseableSongs = downloadableSongs.filter((song) => {
                 const item = ctx.getDownload(song.id);
                 return (
                   item?.status === "downloading" ||
@@ -174,7 +180,7 @@ export default function DownloadCollectionButton({
     }
 
     // ── Not started / paused → show confirm alert with size estimate ──────────
-    const songsToDownload = songs.filter((s) => {
+    const songsToDownload = downloadableSongs.filter((s) => {
       const item = ctx.getDownload(s.id);
       return !item || item.status === "failed" || item.status === "paused" || item.status === "deleted";
     });
@@ -182,10 +188,14 @@ export default function DownloadCollectionButton({
     const estimatedBytes = estimateCollectionSize(songsToDownload);
     const sizeLabel = formatBytes(estimatedBytes);
     const songWord = songsToDownload.length === 1 ? "song" : "songs";
+    const skippedNote =
+      skippedYouTubeCount > 0
+        ? `\n\n${skippedYouTubeCount} YouTube ${skippedYouTubeCount === 1 ? "song is" : "songs are"} streaming only and will be skipped.`
+        : "";
 
     Alert.alert(
       "Download Collection",
-      `Download ${songsToDownload.length} ${songWord} for offline playback?\n\nEstimated size: ~${sizeLabel}`,
+      `Download ${songsToDownload.length} ${songWord} for offline playback?${skippedNote}\n\nEstimated size: ~${sizeLabel}`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -214,18 +224,19 @@ export default function DownloadCollectionButton({
     ctx,
     allDone,
     isActive,
-    songs,
+    downloadableSongs,
     collectionId,
     collectionImage,
     collectionName,
     collectionType,
+    skippedYouTubeCount,
     total,
     completed,
     downloading,
     queued,
   ]);
 
-  if (!ctx || songs.length === 0) return null;
+  if (!ctx || downloadableSongs.length === 0) return null;
 
   // ─── Icon / label state ────────────────────────────────────────────────────
 

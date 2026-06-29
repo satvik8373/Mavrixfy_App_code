@@ -12,7 +12,7 @@ function qualityToBitrate(quality: DownloadQuality): string {
     case "low":
       return "48kbps";
     case "medium":
-      return "128kbps";
+      return "160kbps";
     case "high":
     default:
       return "320kbps";
@@ -83,7 +83,7 @@ function getQualityLabel(quality: DownloadQuality): string {
     case "low":
       return "~48 kbps";
     case "medium":
-      return "~128 kbps";
+      return "~160 kbps";
     case "high":
     default:
       return "~320 kbps";

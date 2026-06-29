@@ -483,8 +483,14 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls, "memory-disk").catch(() => { });
-    preloadDominantColors(urls);
+    
+    // Defer prefetching to avoid blocking navigation transitions
+    const timer = setTimeout(() => {
+      void Image.prefetch(urls, "memory-disk").catch(() => { });
+      preloadDominantColors(urls);
+    }, 350);
+    
+    return () => clearTimeout(timer);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
   const lastMix = useLastMix();
@@ -524,6 +530,9 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
       useNativeDriver: true,
     }).start();
   }, [playerModalVisible, coverOpacity]);
+  
+  // Disable pointer events on artwork during player modal transitions
+  const artworkPointerEvents = playerModalVisible ? "none" : "auto";
 
   const resetMixChip = useCallback(() => {
     Animated.parallel([
@@ -600,12 +609,15 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
     applyMiniPlayerColors(immediateColors.primary, immediateColors.text);
 
-    extractDominantColor(activeSong.coverUrl)
-      .then((colors) => {
-        if (!active) return;
-        applyMiniPlayerColors(colors.primary, colors.text);
-      })
-      .catch(() => { });
+    // Defer to next frame to avoid blocking navigation
+    requestAnimationFrame(() => {
+      extractDominantColor(activeSong.coverUrl)
+        .then((colors) => {
+          if (!active) return;
+          applyMiniPlayerColors(colors.primary, colors.text);
+        })
+        .catch(() => { });
+    });
 
     return () => {
       active = false;
@@ -666,11 +678,11 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     () => colorToRgba(candyTheme.accent, 0.18, "rgba(255,255,255,0.12)"),
     [candyTheme.accent]
   );
-  const miniButtonPrimaryBg = candyTheme.accent;
-  const miniButtonPrimaryBorder = candyTheme.border;
+  const miniButtonPrimaryBg = "#1C1F26";
+  const miniButtonPrimaryBorder = "rgba(255,255,255,0.12)";
   const miniSecondaryButtonBg = "#1C1F26";
   const miniSecondaryButtonBorder = "rgba(255,255,255,0.12)";
-  const miniSecondaryIconColor = "rgba(255,255,255,0.88)";
+  const miniSecondaryIconColor = "#FFFFFF";
   const coverUrl = activeSong?.coverUrl?.trim();
   const miniPlayerHeight = 60;
   const miniCoverSlotSize = 48;
@@ -739,7 +751,10 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                 onPress={openPlayer}
               >
                 <View style={styles.playerLeft}>
-                  <Animated.View style={[styles.coverWrap, { width: miniCoverSlotSize, opacity: coverOpacity }]}>
+                  <Animated.View 
+                    pointerEvents={artworkPointerEvents}
+                    style={[styles.coverWrap, { width: miniCoverSlotSize, opacity: coverOpacity }]}
+                  >
                     {coverUrl && !coverFailed ? (
                       <Image
                         source={{ uri: coverUrl }}
@@ -835,10 +850,14 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                     onPress={() => globalQueueSheetRef.current?.expand()}
                     hitSlop={14}
                     style={({ pressed }) => [
-                      styles.iconButton,
-                      { width: miniControlSize, height: miniControlSize, borderRadius: miniControlRadius },
                       {
+                        width: miniControlSize,
+                        height: miniControlSize,
+                        borderRadius: miniControlRadius,
+                        alignItems: "center",
+                        justifyContent: "center",
                         backgroundColor: miniSecondaryButtonBg,
+                        borderWidth: 1,
                         borderColor: miniSecondaryButtonBorder,
                       },
                       pressed && styles.miniButtonPressed,
@@ -853,15 +872,14 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                     }}
                     hitSlop={14}
                     style={({ pressed }) => [
-                      styles.iconButton,
                       {
                         width: miniControlSize,
                         height: miniControlSize,
                         borderRadius: miniControlRadius,
-                      },
-                      styles.iconButtonPrimary,
-                      {
+                        alignItems: "center",
+                        justifyContent: "center",
                         backgroundColor: miniButtonPrimaryBg,
+                        borderWidth: 1,
                         borderColor: miniButtonPrimaryBorder,
                       },
                       pressed && styles.miniButtonPressed,
@@ -1019,6 +1037,9 @@ function useIOSMiniPlayerOverlayView() {
       useNativeDriver: true,
     }).start();
   }, [playerModalVisible, coverOpacity]);
+  
+  // Disable pointer events on artwork during player modal transitions
+  const iosArtworkPointerEvents = playerModalVisible ? "none" : "auto";
 
   const { push: overlayRouterPush } = useRouter();
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
@@ -1049,8 +1070,14 @@ function useIOSMiniPlayerOverlayView() {
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls, "memory-disk").catch(() => { });
-    preloadDominantColors(urls);
+    
+    // Defer prefetching to avoid blocking navigation transitions
+    const timer = setTimeout(() => {
+      void Image.prefetch(urls, "memory-disk").catch(() => { });
+      preloadDominantColors(urls);
+    }, 350);
+    
+    return () => clearTimeout(timer);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
   const lastMix = useLastMix();
@@ -1100,12 +1127,15 @@ function useIOSMiniPlayerOverlayView() {
     const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
     applyMiniPlayerColors(immediateColors.primary, immediateColors.text);
 
-    extractDominantColor(activeSong.coverUrl)
-      .then((colors) => {
-        if (!active) return;
-        applyMiniPlayerColors(colors.primary, colors.text);
-      })
-      .catch(() => { });
+    // Defer to next frame to avoid blocking navigation
+    requestAnimationFrame(() => {
+      extractDominantColor(activeSong.coverUrl)
+        .then((colors) => {
+          if (!active) return;
+          applyMiniPlayerColors(colors.primary, colors.text);
+        })
+        .catch(() => { });
+    });
 
     return () => {
       active = false;
@@ -1189,7 +1219,10 @@ function useIOSMiniPlayerOverlayView() {
 
         <View style={styles.iosMiniPlayerRow}>
           <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
-            <Animated.View style={[styles.iosMiniPlayerArtworkShell, { opacity: coverOpacity }]}>
+            <Animated.View 
+              pointerEvents={iosArtworkPointerEvents}
+              style={[styles.iosMiniPlayerArtworkShell, { opacity: coverOpacity }]}
+            >
               {activeSong.coverUrl && !coverFailed ? (
                 <Image
                   source={{ uri: activeSong.coverUrl }}
@@ -1309,15 +1342,23 @@ function useIOSMiniPlayerOverlayView() {
               }}
               hitSlop={14}
               style={({ pressed }) => [
-                styles.iosMiniPlayerButton,
-                styles.iosMiniPlayerPrimaryButton,
+                {
+                  width: 42,
+                  height: 42,
+                  borderRadius: 21,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "rgba(28, 31, 38, 0.95)",
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.12)",
+                },
                 pressed && styles.miniButtonPressed,
               ]}
             >
               <Ionicons
                 name={playbackState.isPlaying ? "pause" : "play"}
                 size={25}
-                color="rgba(255,255,255,0.96)"
+                color="#FFFFFF"
                 style={!playbackState.isPlaying ? { marginLeft: 2 } : undefined}
               />
             </Pressable>
@@ -1326,12 +1367,20 @@ function useIOSMiniPlayerOverlayView() {
               onPress={() => globalQueueSheetRef.current?.expand()}
               hitSlop={14}
               style={({ pressed }) => [
-                styles.iosMiniPlayerButton,
-                styles.iosMiniPlayerSecondaryButton,
+                {
+                  width: 42,
+                  height: 42,
+                  borderRadius: 21,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "rgba(28, 31, 38, 0.95)",
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.12)",
+                },
                 pressed && styles.miniButtonPressed,
               ]}
             >
-              <Ionicons name="list" size={24} color="rgba(255,255,255,0.88)" />
+              <Ionicons name="list" size={24} color="#FFFFFF" />
             </Pressable>
           </View>
         </View>

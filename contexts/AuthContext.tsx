@@ -62,6 +62,7 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- Auth state, Firebase auth hooks, credentials login, and registration flow are managed together in this context.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);

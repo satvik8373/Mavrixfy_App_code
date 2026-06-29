@@ -158,7 +158,8 @@ service cloud.firestore {
     }
 
     match /songs/{songId} {
-      allow read: if isPublicCatalogDocument(resource.data);
+      allow get: if signedIn() || isPublicCatalogDocument(resource.data);
+      allow list: if isPublicCatalogDocument(resource.data);
       allow create, update, delete: if isAdmin();
     }
 

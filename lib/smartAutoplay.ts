@@ -66,7 +66,7 @@ const MOOD_KEYWORDS: Array<[string, string[]]> = [
   ["Devotional", ["bhajan", "devotional", "aarti", "mantra", "krishna", "ram", "shiv"]],
 ];
 
-export const DEFAULT_SMART_AUTOPLAY_STATUS: SmartAutoplayStatus = {
+const DEFAULT_SMART_AUTOPLAY_STATUS: SmartAutoplayStatus = {
   enabled: true,
   mode: "similar-trending",
   isRefreshing: false,
@@ -77,7 +77,7 @@ export const DEFAULT_SMART_AUTOPLAY_STATUS: SmartAutoplayStatus = {
   generatedAt: null,
 };
 
-export function getSmartAutoplaySettings(settings: AppSettings): {
+function getSmartAutoplaySettings(settings: AppSettings): {
   enabled: boolean;
   mode: SmartAutoplayMode;
 } {
@@ -128,8 +128,10 @@ function parseTagList(value: unknown): string[] {
   return Array.from(new Set(
     raw
       .split(/[,/|•]+|\s+\+\s+/)
-      .map((part) => textKey(part))
-      .filter(Boolean)
+      .flatMap((part) => {
+        const val = textKey(part);
+        return val ? [val] : [];
+      })
   ));
 }
 

@@ -20,7 +20,6 @@ import {
   ViewStyle
 } from "react-native";
 import { Image } from "expo-image";
-import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -69,6 +68,7 @@ const PLAYER_PRIMARY_DISMISS_START_PX = 8;
 const PLAYER_PRIMARY_DISMISS_CLOSE_PX = 62;
 const PLAYER_PRIMARY_DISMISS_FAST_VELOCITY = 650;
 const PLAYER_PRIMARY_DISMISS_FAIL_X_PX = 34;
+const PLAYER_DISMISS_TOP_OFFSET_PX = 24;
 const PLAYER_PRIMARY_DISMISS_MAX_DRAG_RATIO = 0.58;
 const PLAYER_PRIMARY_DISMISS_SPRING = {
   damping: 24,
@@ -1150,7 +1150,11 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   useEffect(() => {
     setIsScrubbing(false);
     updateSeeking(false);
-  }, [screenSongId, updateSeeking]);
+    if (!isDevPreviewActive) {
+      setLocalProgress(0);
+      lastSyncRef.current = { progress: 0, timestamp: Date.now() };
+    }
+  }, [isDevPreviewActive, screenSongId, updateSeeking]);
 
   // Slider works on a fixed 0..1000 scale. Convert normalized progress to/from it.
   const SLIDER_MAX = 1000;
@@ -1480,8 +1484,6 @@ function useLegacyPlayerScreenView() {
   const [, setDevPreviewIsShuffled] = useState(false);
   const [devPreviewRepeatMode, setDevPreviewRepeatMode] = useState<"off" | "all" | "one">("off");
   const [devPreviewLikedSongIds, setDevPreviewLikedSongIds] = useState<string[]>([]);
-  const skipCooldownRef = useRef(false);
-  const skipCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const artScrollXRef = useRef<Animated.Value | null>(null);
   if (artScrollXRef.current === null) artScrollXRef.current = new Animated.Value(0);
   const artScrollX = artScrollXRef.current;
@@ -1490,23 +1492,15 @@ function useLegacyPlayerScreenView() {
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
   const didHandleSheetDismissRef = useRef(false);
   const sheetDetentReadyAtRef = useRef(0);
+  const playerScrollOffsetYRef = useRef(0);
+  const queueTouchReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playerDismissGestureEnabledRef = useRef(true);
   const playerDismissGestureEnabledShared = useSharedValue(1);
+  const playerScrollOffsetYShared = useSharedValue(0);
   const playerDismissTranslateY = useSharedValue(0);
   const optionsPressLockRef = useRef(false);
+  // react-doctor-disable-next-line react-doctor/no-event-handler -- isDevPreviewActive is a dev-only preview mode helper, not a fake event handler state.
   const isDevPreviewActive = __DEV__ && !currentSong && isDevPreviewEnabled;
-
-  const clearSkipCooldownTimer = useCallback(() => {
-    if (!skipCooldownTimerRef.current) return;
-    clearTimeout(skipCooldownTimerRef.current);
-    skipCooldownTimerRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      clearSkipCooldownTimer();
-    };
-  }, [clearSkipCooldownTimer]);
 
   const setPlayerDismissGestureEnabled = useCallback((enabled: boolean) => {
     if (playerDismissGestureEnabledRef.current === enabled) return;
@@ -1530,6 +1524,10 @@ function useLegacyPlayerScreenView() {
     }
 
     return () => {
+      if (queueTouchReleaseTimerRef.current) {
+        clearTimeout(queueTouchReleaseTimerRef.current);
+        queueTouchReleaseTimerRef.current = null;
+      }
       if (Platform.OS === "ios") {
         navigation.setOptions({ gestureEnabled: true });
       }
@@ -1575,9 +1573,8 @@ function useLegacyPlayerScreenView() {
   const [artistInfo, setArtistInfo] = useState<JioSaavnArtist | null>(null);
   const [artistFollowing, setArtistFollowing] = useState(false);
   const artistFetchIdRef = useRef<string>("");
-  const devPreviewSong =
-    DEV_PREVIEW_SONGS[Math.max(0, Math.min(devPreviewIndex, DEV_PREVIEW_SONGS.length - 1))] ??
-    DEV_PREVIEW_SONGS[0];
+  // react-doctor-disable-next-line react-doctor/no-event-handler -- devPreviewIndex is used to index into DEV_PREVIEW_SONGS in dev-preview mode.
+  const devPreviewSong = DEV_PREVIEW_SONGS[Math.max(0, Math.min(devPreviewIndex, DEV_PREVIEW_SONGS.length - 1))] ?? DEV_PREVIEW_SONGS[0];
   const screenSong = currentSong ?? (isDevPreviewActive ? devPreviewSong : null);
   const screenSongIsYouTube = Boolean(screenSong?.source === "youtube" || screenSong?.id?.startsWith("youtube_"));
 
@@ -1585,7 +1582,7 @@ function useLegacyPlayerScreenView() {
 
   // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song after the resolver verifies an official visual match.
   useEffect(() => {
-    if (!screenSong) {
+    if (!screenSong || !screenSongIsYouTube || !ambientBackdropEnabled || isLowEnd) {
       setBackgroundVideoId(null);
       return;
     }
@@ -1593,31 +1590,30 @@ function useLegacyPlayerScreenView() {
     setBackgroundVideoId(null);
 
     let cancelled = false;
-    void getYouTubeMusicVisualVideoId(screenSong)
-      .then((visualVideoId) => {
-        if (cancelled) return;
-        setBackgroundVideoId(visualVideoId || null);
-      })
-      .catch(() => undefined);
+    const task = InteractionManager.runAfterInteractions(() => {
+      void getYouTubeMusicVisualVideoId(screenSong)
+        .then((visualVideoId) => {
+          if (cancelled) return;
+          setBackgroundVideoId(visualVideoId || null);
+        })
+        .catch(() => undefined);
+    });
 
     return () => {
       cancelled = true;
+      task.cancel();
     };
-  }, [screenSong]);
+  }, [ambientBackdropEnabled, isLowEnd, screenSong, screenSongIsYouTube]);
 
-  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
-  const [prevSongId, setPrevSongId] = useState(screenSong?.id);
-
-  if (screenSong?.id !== prevSongId) {
-    setPrevSongId(screenSong?.id);
-    setHasStartedPlaying(false);
-  }
+  const [playedSongId, setPlayedSongId] = useState<string | null>(null);
+  const hasStartedPlaying = screenSong?.id ? playedSongId === screenSong.id : false;
 
   useEffect(() => {
-    if (playbackState.isPlaying && !playbackState.isLoading && !playbackState.isBuffering) {
-      setHasStartedPlaying(true);
+    if (screenSong?.id && playbackState.isPlaying && !playbackState.isLoading && !playbackState.isBuffering) {
+      // react-doctor-disable-next-line react-doctor/no-derived-state -- playedSongId tracks whether the current song has started playing at least once, which cannot be derived from instantaneous playbackState.
+      setPlayedSongId(screenSong.id);
     }
-  }, [playbackState.isPlaying, playbackState.isLoading, playbackState.isBuffering]);
+  }, [screenSong?.id, playbackState.isPlaying, playbackState.isLoading, playbackState.isBuffering]);
 
   const ambientVideoLayoutActive = useMemo(() => Boolean(
     ambientBackdropEnabled &&
@@ -1746,15 +1742,22 @@ function useLegacyPlayerScreenView() {
     const immediateColors = getImmediateArtworkColor(cover);
     applyPlayerArtworkColors(immediateColors.primary, immediateColors.text);
 
-    extractDominantColor(cover)
-      .then((colors) => {
-        if (!active) return;
-        applyPlayerArtworkColors(colors.primary, colors.text);
-      })
-      .catch(() => {});
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        extractDominantColor(cover)
+          .then((colors) => {
+            if (!active) return;
+            applyPlayerArtworkColors(colors.primary, colors.text);
+          })
+          .catch(() => {});
+      }, 80);
+    });
 
     return () => {
       active = false;
+      task.cancel();
+      if (timer) clearTimeout(timer);
     };
   }, [applyPlayerArtworkColors, interactionReady, screenSong?.id, screenSong?.coverUrl]);
 
@@ -1767,24 +1770,33 @@ function useLegacyPlayerScreenView() {
     let cancelled = false;
     const fetchId = artistName;
     artistFetchIdRef.current = fetchId;
+    clearArtistInfo();
 
-    // Try to find artist by name then fetch full details
-    searchArtists(artistName)
-      .then(async (results) => {
-        if (cancelled || artistFetchIdRef.current !== fetchId) return;
-        const first = results[0];
-        if (!first) return;
-        const [details, following] = await Promise.all([
-          getArtistDetails(first.id),
-          isFollowingArtist(first.id),
-        ]);
-        if (!cancelled && artistFetchIdRef.current === fetchId) {
-          applyArtistInfoSnapshot(details, following);
-        }
-      })
-      .catch(() => {});
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        searchArtists(artistName)
+          .then(async (results) => {
+            if (cancelled || artistFetchIdRef.current !== fetchId) return;
+            const first = results[0];
+            if (!first) return;
+            const [details, following] = await Promise.all([
+              getArtistDetails(first.id),
+              isFollowingArtist(first.id),
+            ]);
+            if (!cancelled && artistFetchIdRef.current === fetchId) {
+              applyArtistInfoSnapshot(details, following);
+            }
+          })
+          .catch(() => {});
+      }, 300);
+    });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      task.cancel();
+      if (timer) clearTimeout(timer);
+    };
   }, [applyArtistInfoSnapshot, clearArtistInfo, interactionReady, currentSong?.artist]);
 
   const rawTopInset = Platform.OS === "web" ? 67 : insets.top;
@@ -2099,12 +2111,16 @@ function useLegacyPlayerScreenView() {
       ? devPreviewLikedSongIds.includes(screenSong.id)
       : isLiked(screenSong.id)
     : false;
-  const queueViewportHeight = Math.min(
-    playingQueue.length * (isShortScreen ? 48 : 54) + 10,
-    isShortScreen ? 286 : 274
+  const queueRowHeight = isShortScreen ? 48 : 54;
+  const queueContentHeight = playingQueue.length * queueRowHeight + 18;
+  const queueMaxViewportHeight = Math.max(
+    isShortScreen ? 300 : 360,
+    Math.floor(screenHeight * (isShortScreen ? 0.42 : 0.46))
   );
+  const queueViewportHeight = Math.min(queueContentHeight, queueMaxViewportHeight);
+  const queueCanScroll = queueContentHeight > queueViewportHeight + 1;
   const queueViewportStyle = useMemo(
-    () => ({ height: queueViewportHeight }),
+    () => ({ height: queueViewportHeight, maxHeight: queueViewportHeight }),
     [queueViewportHeight]
   );
   const artCarouselViewportWidth = screenWidth;
@@ -2265,13 +2281,6 @@ function useLegacyPlayerScreenView() {
       if (targetIndex < 0 || targetIndex >= playingQueue.length || targetIndex === activeQueueIndex) {
         return;
       }
-      if (skipCooldownRef.current) return;
-      skipCooldownRef.current = true;
-      clearSkipCooldownTimer();
-      skipCooldownTimerRef.current = setTimeout(() => {
-        skipCooldownRef.current = false;
-        skipCooldownTimerRef.current = null;
-      }, 400);
 
       if (isDevPreviewActive) {
         setDevPreviewIndex(targetIndex);
@@ -2296,7 +2305,7 @@ function useLegacyPlayerScreenView() {
 
       playSong(targetSong, playingQueue);
     },
-    [activeQueueIndex, clearSkipCooldownTimer, isDevPreviewActive, nextSong, playSong, playingQueue, prevSong]
+    [activeQueueIndex, isDevPreviewActive, nextSong, playSong, playingQueue, prevSong]
   );
 
   const handlePlayerAdToggle = useCallback((event: GestureResponderEvent) => {
@@ -2348,8 +2357,46 @@ function useLegacyPlayerScreenView() {
 
   const handlePlayerScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const offsetY = Math.max(0, event.nativeEvent.contentOffset.y);
-    setPlayerDismissGestureEnabled(offsetY <= 2);
+    playerScrollOffsetYRef.current = offsetY;
+    playerScrollOffsetYShared.value = offsetY;
+    setPlayerDismissGestureEnabled(offsetY <= PLAYER_DISMISS_TOP_OFFSET_PX);
+  }, [playerScrollOffsetYShared, setPlayerDismissGestureEnabled]);
+
+  const lockQueueScroll = useCallback(() => {
+    if (!queueCanScroll) return;
+    if (queueTouchReleaseTimerRef.current) {
+      clearTimeout(queueTouchReleaseTimerRef.current);
+      queueTouchReleaseTimerRef.current = null;
+    }
+    setPlayerDismissGestureEnabled(false);
+  }, [queueCanScroll, setPlayerDismissGestureEnabled]);
+
+  const releaseQueueScroll = useCallback(() => {
+    if (queueTouchReleaseTimerRef.current) {
+      clearTimeout(queueTouchReleaseTimerRef.current);
+      queueTouchReleaseTimerRef.current = null;
+    }
+    setPlayerDismissGestureEnabled(playerScrollOffsetYRef.current <= PLAYER_DISMISS_TOP_OFFSET_PX);
   }, [setPlayerDismissGestureEnabled]);
+
+  const scheduleQueueScrollRelease = useCallback(() => {
+    if (queueTouchReleaseTimerRef.current) {
+      clearTimeout(queueTouchReleaseTimerRef.current);
+    }
+    queueTouchReleaseTimerRef.current = setTimeout(() => {
+      queueTouchReleaseTimerRef.current = null;
+      releaseQueueScroll();
+    }, 700);
+  }, [releaseQueueScroll]);
+
+  const handleQueueScrollEndDrag = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const velocityY = Math.abs(event.nativeEvent.velocity?.y ?? 0);
+    if (velocityY < 0.05) {
+      releaseQueueScroll();
+    } else {
+      scheduleQueueScrollRelease();
+    }
+  }, [releaseQueueScroll, scheduleQueueScrollRelease]);
 
   const finishPlayerGestureDismiss = useCallback(() => {
     if (didHandleSheetDismissRef.current) {
@@ -2367,11 +2414,22 @@ function useLegacyPlayerScreenView() {
         .activeOffsetY([-100000, PLAYER_PRIMARY_DISMISS_START_PX])
         .failOffsetX([-PLAYER_PRIMARY_DISMISS_FAIL_X_PX, PLAYER_PRIMARY_DISMISS_FAIL_X_PX])
         .onBegin(() => {
-          if (playerDismissGestureEnabledShared.value <= 0) {
-            playerDismissTranslateY.value = 0;
+          if (
+            playerDismissGestureEnabledShared.value <= 0 &&
+            playerScrollOffsetYShared.value <= PLAYER_DISMISS_TOP_OFFSET_PX
+          ) {
+            playerDismissGestureEnabledShared.value = 1;
           }
+          playerDismissTranslateY.value = 0;
         })
         .onUpdate((event) => {
+          const canDismissFromTop =
+            playerScrollOffsetYShared.value <= PLAYER_DISMISS_TOP_OFFSET_PX &&
+            event.translationY > 0;
+          if (playerDismissGestureEnabledShared.value <= 0 && canDismissFromTop) {
+            playerDismissGestureEnabledShared.value = 1;
+          }
+
           if (playerDismissGestureEnabledShared.value <= 0) {
             playerDismissTranslateY.value = 0;
             return;
@@ -2387,6 +2445,13 @@ function useLegacyPlayerScreenView() {
           playerDismissTranslateY.value = resistedTranslateY;
         })
         .onEnd((event) => {
+          const canDismissFromTop =
+            playerScrollOffsetYShared.value <= PLAYER_DISMISS_TOP_OFFSET_PX &&
+            event.translationY > 0;
+          if (playerDismissGestureEnabledShared.value <= 0 && canDismissFromTop) {
+            playerDismissGestureEnabledShared.value = 1;
+          }
+
           if (playerDismissGestureEnabledShared.value <= 0) {
             playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
             return;
@@ -2424,6 +2489,7 @@ function useLegacyPlayerScreenView() {
       finishPlayerGestureDismiss,
       isProgressSeeking,
       playerDismissGestureEnabledShared,
+      playerScrollOffsetYShared,
       playerDismissTranslateY,
       screenHeight,
     ]
@@ -2853,6 +2919,9 @@ function useLegacyPlayerScreenView() {
         alwaysBounceVertical={Platform.OS === "ios"}
         overScrollMode="never"
         onScroll={handlePlayerScroll}
+        onScrollBeginDrag={handlePlayerScroll}
+        onScrollEndDrag={handlePlayerScroll}
+        onMomentumScrollEnd={handlePlayerScroll}
         scrollEventThrottle={16}
         ListHeaderComponent={
           <>
@@ -2902,6 +2971,7 @@ function useLegacyPlayerScreenView() {
               ]}
             >
                 <GestureDetector gesture={playerPrimaryDismissGesture}>
+                  <View collapsable={false}>
                   <View
                     style={[
                       styles.playerPrimaryStack,
@@ -3000,6 +3070,13 @@ function useLegacyPlayerScreenView() {
                     velocity={10}
                     paused={!interactionReady}
                   />
+                  {screenSong.bitrateKbps ? (
+                    <View style={styles.qualityContainer}>
+                      <Text style={styles.qualityText}>
+                        {screenSong.audioCodec && /opus/i.test(screenSong.audioCodec) ? "OPUS" : "AAC"} • {screenSong.bitrateKbps} KBPS
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
                 <View style={styles.songDetailActions}>
                   <SmoothControlButton
@@ -3045,7 +3122,6 @@ function useLegacyPlayerScreenView() {
               </View>
             </Reanimated.View>
             </View>
-                </GestureDetector>
 
             <Reanimated.View style={controlsDismissAnimatedStyle}>
               <View style={styles.playerActionStack}>
@@ -3160,47 +3236,23 @@ function useLegacyPlayerScreenView() {
 
             </View>
             </Reanimated.View>
+                  </View>
+                </GestureDetector>
           </View>
 
           <Reanimated.View style={controlsDismissAnimatedStyle}>
             <View
               style={[
                 styles.playingListSection,
-              ambientVideoLayoutActive
-                ? {
-                    marginTop: 0,
-                    marginHorizontal: 0,
-                    borderRadius: 0,
-                    borderWidth: 0,
-                    backgroundColor: "rgba(25,28,35,0.92)",
-                  }
-                : {
-                    marginTop: 0,
-                    marginHorizontal: isShortScreen ? 14 : 20,
-                  },
+                {
+                  marginTop: 0,
+                  marginHorizontal: 0,
+                  borderRadius: 0,
+                  borderWidth: 0,
+                  backgroundColor: "rgba(25,28,35,0.92)",
+                },
             ]}
           >
-            {!ambientVideoLayoutActive && (
-              <>
-                {Platform.OS === "ios" ? (
-                  <BlurView
-                    pointerEvents="none"
-                    intensity={26}
-                    tint="dark"
-                    experimentalBlurMethod="none"
-                    style={StyleSheet.absoluteFillObject}
-                  />
-                ) : (
-                  <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(20,23,30,0.9)" }]} />
-                )}
-                <LinearGradient
-                  pointerEvents="none"
-                  colors={["rgba(35,38,45,0.5)", "rgba(13,16,22,0.74)"]}
-                  locations={[0, 1]}
-                  style={StyleSheet.absoluteFillObject}
-                />
-              </>
-            )}
             <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
               <Text style={styles.playingListTitle}>Queue</Text>
             </View>
@@ -3210,11 +3262,21 @@ function useLegacyPlayerScreenView() {
               renderItem={renderQueueItem}
               getItemLayout={getQueueItemLayout}
               style={[styles.queueListViewport, queueViewportStyle]}
+              scrollEnabled={queueCanScroll}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.queueListContent}
               nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
               bounces={false}
               overScrollMode="never"
+              onTouchStart={lockQueueScroll}
+              onTouchEnd={releaseQueueScroll}
+              onTouchCancel={releaseQueueScroll}
+              onScrollBeginDrag={lockQueueScroll}
+              onScrollEndDrag={handleQueueScrollEndDrag}
+              onMomentumScrollBegin={lockQueueScroll}
+              onMomentumScrollEnd={releaseQueueScroll}
+              scrollEventThrottle={16}
               initialNumToRender={12}
               maxToRenderPerBatch={8}
               updateCellsBatchingPeriod={50}
@@ -3828,7 +3890,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(20,23,30,0.5)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
-    maxHeight: 320,
   },
   queueListContent: {
     paddingHorizontal: 12,
@@ -4440,5 +4501,19 @@ const styles = StyleSheet.create({
   },
   creditValueCapitalized: {
     textTransform: "capitalize",
+  },
+  qualityContainer: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    marginTop: 4,
+  },
+  qualityText: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontSize: 9,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.5,
   },
 });

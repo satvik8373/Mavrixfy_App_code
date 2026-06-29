@@ -10,13 +10,16 @@ import { Pressable, ActivityIndicator, StyleSheet, View, Alert, Text } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import { useDownloads, useSongDownload } from '@/contexts/DownloadContext';
-import type { Song } from '@/lib/musicData';
+import { getBestAudioUrlWithQuality, type Song } from '@/lib/musicData';
 import { logger } from '@/lib/logger';
 import { formatBytes } from '@/lib/downloads/storagePolicy';
-import { resolveYouTubeSongToJioSaavn } from '@/lib/youtubeToJioSaavnDownload';
+import { isYouTubeBackedSong } from '@/lib/downloads/sourceGuards';
 
 function resolveSongAudioUrl(song: Song): string {
   if (song.audioUrl) return song.audioUrl;
+
+  const bestDownloadUrl = getBestAudioUrlWithQuality(song.downloadUrl, "high");
+  if (bestDownloadUrl) return bestDownloadUrl;
   
   // @ts-ignore
   const directCandidates = [song.url, song.uri, song.streamUrl, song.downloadUrl];
@@ -57,11 +60,9 @@ export default function DownloadButton({
   showLabel = false,
 }: DownloadButtonProps) {
   const { downloadSong, removeDownload } = useDownloads();
-  const isYouTube = song.source === 'youtube' || song.id?.startsWith('youtube_') || song.id?.startsWith('yt:');
-  const [downloadTarget, setDownloadTarget] = useState<Song | null>(null);
   const [isPreparing, setIsPreparing] = useState(false);
-  const activeSong = downloadTarget || song;
-  const download = useSongDownload(activeSong.id);
+  const isYouTube = isYouTubeBackedSong(song);
+  const download = useSongDownload(song.id);
 
   const isDownloaded = download?.status === 'completed';
   const isDownloading =
@@ -73,34 +74,19 @@ export default function DownloadButton({
 
   const progress = (download?.progress ?? 0) / 100;
 
+  if (isYouTube) {
+    return null;
+  }
+
   async function handleDownload() {
     if (isDownloading) return;
 
     setIsPreparing(true);
     try {
-      let targetSong = song;
-      let matchedFromYouTube = false;
-
-      if (isYouTube) {
-        const match = await resolveYouTubeSongToJioSaavn(song);
-        if (!match?.song) {
-          setIsPreparing(false);
-          Alert.alert(
-            'Download Unavailable',
-            'Could not find a confident JioSaavn match for this YouTube song.'
-          );
-          return;
-        }
-
-        targetSong = match.song;
-        matchedFromYouTube = true;
-        setDownloadTarget(targetSong);
-      }
-
       let sizeLabel = 'unknown size';
       let actualSize: number | null = null;
       
-      const audioUrl = resolveSongAudioUrl(targetSong);
+      const audioUrl = resolveSongAudioUrl(song);
       if (audioUrl) {
         try {
           const response = await fetch(audioUrl, { method: 'HEAD' });
@@ -115,7 +101,7 @@ export default function DownloadButton({
       }
 
       if (!actualSize) {
-        const estimatedBytes = (targetSong.duration || 0) * 25_000;
+        const estimatedBytes = (song.duration || 0) * 25_000;
         sizeLabel = estimatedBytes > 0 ? `~${formatBytes(estimatedBytes)}` : 'unknown size';
       }
 
@@ -123,14 +109,14 @@ export default function DownloadButton({
 
       Alert.alert(
         'Download Song',
-        `Download "${targetSong.title}" for offline playback?${matchedFromYouTube ? '\n\nMatched from JioSaavn.' : ''}\n\nSize: ${sizeLabel}`,
+        `Download "${song.title}" for offline playback?\n\nSize: ${sizeLabel}`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Download',
             onPress: async () => {
               try {
-                const res = await downloadSong(targetSong);
+                const res = await downloadSong(song);
                 if (!res.ok) {
                   Alert.alert('Download Failed', res.reason || 'Could not queue download');
                 }
@@ -150,14 +136,14 @@ export default function DownloadButton({
   async function handleDelete() {
     Alert.alert(
       'Delete Download',
-      `Remove "${activeSong.title}" from downloads?`,
+      `Remove "${song.title}" from downloads?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await removeDownload(activeSong.id);
+            await removeDownload(song.id);
             onDownloadDeleted?.();
           }
         }
@@ -196,7 +182,7 @@ export default function DownloadButton({
       {showLabel && (
         <Text style={[styles.rowText, isDownloaded && styles.labelActive]}>
           {isDownloading
-            ? isPreparing && isYouTube ? `Matching...` : `Downloading...`
+            ? isPreparing ? `Preparing...` : `Downloading...`
             : isDownloaded
             ? `Downloaded`
             : `Download`}

@@ -22,6 +22,8 @@ export interface Song {
   youtubeAudioExpiresAt?: number;
   playbackHeaders?: Record<string, string>;
   downloadUrl?: unknown;
+  bitrateKbps?: number;
+  audioCodec?: string;
 }
 
 export interface JioSaavnImage {
@@ -161,6 +163,7 @@ function getBestAudioUrl(downloadUrls: unknown): string {
   const candidates = normalizeAudioCandidates(downloadUrls);
   if (candidates.length === 0) return "";
 
+  // Official method: Always prioritize highest quality audio (320kbps) for best sound
   const sorted = sortedCopy(candidates, (a, b) => {
     const qualityOrder: Record<string, number> = { "320kbps": 4, "160kbps": 3, "96kbps": 2, "48kbps": 1, "12kbps": 0 };
     return (qualityOrder[b.quality] || 0) - (qualityOrder[a.quality] || 0);
@@ -172,10 +175,11 @@ export function getBestAudioUrlWithQuality(downloadUrls: unknown, quality: "low"
   const candidates = normalizeAudioCandidates(downloadUrls);
   if (candidates.length === 0) return "";
 
+  // Official JioSaavn quality levels: 320kbps (high), 160kbps (medium), 96kbps (low)
   const targetQualityOrder: Record<string, string[]> = {
     low: ["96kbps", "48kbps", "12kbps", "160kbps", "320kbps"],
     medium: ["160kbps", "96kbps", "320kbps", "48kbps", "12kbps"],
-    high: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"],
+    high: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"], // Always prefer 320kbps for best quality
   };
 
   const preference = targetQualityOrder[quality] || targetQualityOrder.high;
@@ -191,6 +195,13 @@ export function getBestAudioUrlWithQuality(downloadUrls: unknown, quality: "low"
 
 export function convertJioSaavnSong(song: JioSaavnSong): Song {
   const artistNames = song.artists?.primary?.map(a => a.name).join(", ") || "Unknown Artist";
+  const audioUrl = getBestAudioUrl(song.downloadUrl || song.audioUrl || song.url);
+  let bitrateKbps = 320;
+  if (audioUrl.includes("_96.")) bitrateKbps = 96;
+  else if (audioUrl.includes("_160.")) bitrateKbps = 160;
+  else if (audioUrl.includes("_48.")) bitrateKbps = 48;
+  else if (audioUrl.includes("_12.")) bitrateKbps = 12;
+
   return {
     id: song.id,
     title: song.name || "Unknown",
@@ -199,11 +210,13 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     duration: song.duration || 0,
     coverUrl: getBestImageUrl(song.image),
     genre: song.language || "",
-    audioUrl: getBestAudioUrl(song.downloadUrl || song.audioUrl || song.url),
+    audioUrl,
     downloadUrl: song.downloadUrl || song.audioUrl || song.url,
     year: song.year,
     language: song.language,
     source: "jiosaavn",
+    bitrateKbps,
+    audioCodec: "aac",
   };
 }
 

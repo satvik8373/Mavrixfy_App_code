@@ -43,7 +43,13 @@ import { sortedCopy } from "@/lib/arrayUtils";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { getJioSaavnAlbumDetails, getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
-import { getYouTubeMusicPlaylist, getYouTubeMusicAlbum, convertYouTubeMusicTrack } from "@/lib/youtubeMusicService";
+import {
+  getYouTubeMusicPlaylist,
+  getYouTubeMusicAlbum,
+  convertYouTubeMusicTrack,
+  getBestYouTubeThumbnailUrl,
+  normalizeYouTubeArtworkUrl,
+} from "@/lib/youtubeMusicService";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
@@ -95,6 +101,7 @@ function usePlaylistScreenView() {
   const sourceLink       = pickFirstParam(params.link).trim();
   const initialTitle     = pickFirstParam(params.title).trim();
   const initialCover     = pickFirstParam(params.cover).trim();
+  const normalizedInitialCover = isYouTubeSource ? normalizeYouTubeArtworkUrl(initialCover) : initialCover;
   const initialDescription = pickFirstParam(params.description).trim();
   const initialSongCount = Math.max(0, Number(pickFirstParam(params.songCount)) || 0);
   const hasPrefilledHeader = initialTitle.length > 0 || initialCover.length > 0 || initialSongCount > 0;
@@ -119,7 +126,7 @@ function usePlaylistScreenView() {
   // ── State ──────────────────────────────────────────────────────────────────
   const [loading, setLoading]           = useState(true);
   const [playlistName, setPlaylistName] = useState(initialTitle);
-  const [playlistCover, setPlaylistCover] = useState(initialCover);
+  const [playlistCover, setPlaylistCover] = useState(normalizedInitialCover);
   const [playlistDescription, setPlaylistDescription] = useState(
     initialDescription || (initialSongCount > 0 ? `${initialSongCount} songs` : "")
   );
@@ -230,20 +237,20 @@ function usePlaylistScreenView() {
     });
     setPlaylistName(playlist.name || initialTitle || "Playlist");
     setPlaylistDescription((playlist.description || "").trim() || `${nextSongs.length || initialSongCount} songs`);
-    setPlaylistCover(playlist.imageUrl || initialCover || "");
+    setPlaylistCover(playlist.imageUrl || normalizedInitialCover || "");
     setPlaylistIsPublic(playlist.isPublic ?? false);
     setSongs(nextSongs);
-  }, [initialCover, initialSongCount, initialTitle, playlistId]);
+  }, [initialSongCount, initialTitle, normalizedInitialCover, playlistId]);
 
   const resetPlaylistLoadState = useCallback(() => {
     setPlaylistName(initialTitle);
     setPlaylistDescription(initialDescription || (initialSongCount > 0 ? `${initialSongCount} songs` : ""));
-    setPlaylistCover(initialCover);
+    setPlaylistCover(normalizedInitialCover);
     setSongs([]);
     setNotFound(false);
     setLoadError("");
     setLoading(true);
-  }, [initialCover, initialDescription, initialSongCount, initialTitle]);
+  }, [initialDescription, initialSongCount, initialTitle, normalizedInitialCover]);
 
   const applyLocalPlaylistData = useCallback((playlist: UserPlaylist) => {
     setPlaylistName(playlist.name);
@@ -290,10 +297,7 @@ function usePlaylistScreenView() {
           if (!cancelled) {
             if (data) {
               setPlaylistName(data.title);
-              const cover = data.thumbnails && data.thumbnails.length > 0
-                ? data.thumbnails[data.thumbnails.length - 1].url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?$/, "=w500-h500-l90-rj")
-                : "";
-              setPlaylistCover(cover);
+              setPlaylistCover(getBestYouTubeThumbnailUrl(data.thumbnails) || normalizedInitialCover);
               const description = ("description" in data && typeof data.description === "string") ? data.description : `${data.trackCount || data.tracks?.length || 0} tracks`;
               setPlaylistDescription(description);
               const finalSongs = (data.tracks || [])
@@ -368,7 +372,7 @@ function usePlaylistScreenView() {
     applyFirestorePlaylistData, applyJioPlaylistData,
     applyLocalPlaylistData, finishPlaylistLoad,
     hasPrefilledHeader, markPlaylistLoadError, markPlaylistNotFound,
-    resetPlaylistLoadState,
+    normalizedInitialCover, resetPlaylistLoadState,
   ]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────

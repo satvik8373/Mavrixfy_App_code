@@ -57,6 +57,14 @@ const SHEET_BG = "#1A1A1A";
 const HANDLE_COLOR = "#4A4A4A";
 const SWIPE_WIDTH = 92;
 
+const smartAutoplayStatus = {
+  enabled: false,
+  isRefreshing: false,
+  mode: "similar-trending" as const,
+  basisLabels: [],
+  generatedCount: 0,
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type QueueItem = {
   song: Song;
@@ -414,13 +422,6 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       togglePlay,
     } = usePlayerActions();
 
-    const smartAutoplayStatus = {
-      enabled: false,
-      isRefreshing: false,
-      mode: "similar-trending" as const,
-      basisLabels: [],
-      generatedCount: 0,
-    };
 
     const openSwipeRef = useRef<Swipeable | null>(null);
     const lastPlaceholderRef = useRef<number | null>(null);
@@ -602,10 +603,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       }));
     }, [currentSong, queueIndex, upcomingQueue, userQueuedCount]);
 
-    const smartModeLabel = useMemo(
-      () => getSmartAutoplayModeLabel(smartAutoplayStatus.mode),
-      [smartAutoplayStatus.mode]
-    );
+    const smartModeLabel = getSmartAutoplayModeLabel(smartAutoplayStatus.mode);
 
     // ── Handlers ─────────────────────────────────────────────────────────────
     const handleSongPress = useCallback(
@@ -679,7 +677,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
           />
         </View>
       ),
-      [handleSongPress, handleSwipeOpen, isPlaying, removeFromQueue, smartAutoplayStatus.enabled]
+      [handleSongPress, handleSwipeOpen, isPlaying, removeFromQueue]
     );
 
     const keyExtractor = useCallback((item: QueueItem) => item.key, []);

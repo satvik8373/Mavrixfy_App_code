@@ -53,7 +53,8 @@ import AdMobNativeVideo from "@/components/AdMobNativeVideo";
 import {
   getYouTubeMusicSearchSuggestions,
   searchYouTubeMusic,
-  searchYouTubeMusicVideos
+  searchYouTubeMusicVideos,
+  normalizeYouTubeArtworkUrl,
 } from "@/lib/youtubeMusicService";
 import { logger } from "@/lib/logger";
 
@@ -100,7 +101,7 @@ interface BrowseCategory {
   isHero?: boolean;
 }
 
-type ResultFilter = "all" | "songs" | "youtube" | "albums" | "artists" | "playlists";
+type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
 const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -596,6 +597,23 @@ function uniqueSongResultIds(songs: Song[]): Song[] {
   });
 }
 
+function interleaveSearchSongResults(primarySongs: Song[], discoverySongs: Song[], keepVersionWords: boolean): Song[] {
+  const merged: Song[] = [];
+  const append = (song: Song | undefined) => {
+    if (!song) return;
+    const duplicate = merged.some((existing) => areDuplicateSearchSongs(song, existing, keepVersionWords));
+    if (!duplicate) merged.push(song);
+  };
+
+  const longest = Math.max(primarySongs.length, discoverySongs.length);
+  for (let index = 0; index < longest; index += 1) {
+    append(primarySongs[index]);
+    append(discoverySongs[index]);
+  }
+
+  return uniqueSongResultIds(merged);
+}
+
 function isYouTubeCollectionResult(id: string, url?: string, description?: string): boolean {
   const value = String(id || "").trim();
   const lowerUrl = String(url || "").toLowerCase();
@@ -663,7 +681,6 @@ function useSearchScreenView() {
   const resultsAlbumsListRef = useRef<FlatList<AlbumResult> | null>(null);
   const resultsArtistsListRef = useRef<FlatList<ArtistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
-  const resultsYoutubeListRef = useRef<FlatList<Song> | null>(null);
   const searchCacheRef = useRef<Map<string, SearchCacheEntry> | null>(null);
   if (searchCacheRef.current === null) {
     searchCacheRef.current = new Map();
@@ -770,6 +787,7 @@ function useSearchScreenView() {
         id: s.id, title: s.name || s.title || '', artist,
         album: typeof s.album === "string" ? s.album : s.album?.name || '', duration: sec,
         coverUrl, genre: s.language || '', audioUrl,
+        downloadUrl: s.downloadUrl,
         year: s.year ? String(s.year) : '', source: 'jiosaavn',
         playCount: Number(s.playCount) || 0,
       };
@@ -1308,8 +1326,6 @@ function useSearchScreenView() {
         resultsAlbumsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else if (resultFilter === "artists") {
         resultsArtistsListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      } else if (resultFilter === "youtube") {
-        resultsYoutubeListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
@@ -1326,6 +1342,10 @@ function useSearchScreenView() {
   const showBrowse = !isSearchMode && query.trim().length < 2;
   const resultDataKey =
     `${query.trim()}-${resultFilter}-${songResults.length}-${youtubeMusicResults.length}-${albumResults.length}-${artistResults.length}-${playlistResults.length}-${searchLoading ? 1 : 0}`;
+  const mixedSongResults = useMemo(
+    () => interleaveSearchSongResults(songResults, youtubeMusicResults, hasSongVersionIntent(query)),
+    [query, songResults, youtubeMusicResults]
+  );
   const searchHeaderNode = useMemo(
     () => (
       <SearchHeaderField
@@ -1363,8 +1383,6 @@ function useSearchScreenView() {
         resultsAlbumsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else if (resultFilter === "artists") {
         resultsArtistsListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      } else if (resultFilter === "youtube") {
-        resultsYoutubeListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
@@ -1374,15 +1392,10 @@ function useSearchScreenView() {
   const showAlbumResults = (resultFilter === "all" || resultFilter === "albums") && albumResults.length > 0;
   const showArtistResults = (resultFilter === "all" || resultFilter === "artists") && artistResults.length > 0;
   const showPlaylistResults = (resultFilter === "all" || resultFilter === "playlists") && playlistResults.length > 0;
-  const showSongResults = (resultFilter === "all" || resultFilter === "songs") && songResults.length > 0;
-  const hasYoutubeResults = youtubeMusicResults.length > 0;
-  const appResultCount = songResults.length + albumResults.length + artistResults.length + playlistResults.length;
-  const showYoutubeResults = resultFilter === "youtube" && hasYoutubeResults;
-  const youtubePreviewResults = useMemo(() => youtubeMusicResults.slice(0, 3), [youtubeMusicResults]);
-  const showYoutubePreviewSection = resultFilter === "all" && youtubePreviewResults.length > 0;
+  const showSongResults = (resultFilter === "all" || resultFilter === "songs") && mixedSongResults.length > 0;
   const displayedSongs = useMemo(
-    () => (showSongResults ? songResults : []),
-    [showSongResults, songResults]
+    () => (showSongResults ? mixedSongResults : []),
+    [mixedSongResults, showSongResults]
   );
   const featuredAlbums = useMemo(() => albumResults.slice(0, 6), [albumResults]);
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
@@ -1399,109 +1412,11 @@ function useSearchScreenView() {
           <SongRow
             song={item}
             onSongPress={handleSongResultPress}
-            showSearchSourceMeta
           />
       );
     },
     [handleSongResultPress]
   );
-
-  const handleYoutubeResultPress = useCallback((song: Song) => {
-    void addSongSearchHistoryItem(song)
-      .then((items) => setRecentSearches(toRecentSearchItems(items)))
-      .catch(() => undefined);
-    void playSong(song, [song]);
-  }, [playSong]);
-
-  const handleShowAppResults = useCallback(() => {
-    resetHeaderElevation();
-    setResultFilter("all");
-  }, [resetHeaderElevation]);
-
-  const handleShowYoutubeResults = useCallback(() => {
-    resetHeaderElevation();
-    if (query.trim().length >= 2) {
-      setResultFilter("youtube");
-    }
-  }, [query, resetHeaderElevation]);
-
-  const getYoutubeResultElement = useCallback(
-    (item: Song) => (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Play ${item.title} by ${item.artist}`}
-        style={({ pressed }) => [styles.youtubeResultRow, pressed && styles.youtubeResultRowPressed]}
-        onPress={() => handleYoutubeResultPress(item)}
-      >
-        <Image
-          recyclingKey={`youtube-${item.id}`}
-          source={{ uri: item.coverUrl }}
-          style={styles.youtubeResultImage}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={100}
-        />
-        <View style={styles.youtubeResultInfo}>
-          <Text style={styles.youtubeResultTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.youtubeResultArtist} numberOfLines={1}>{item.artist}</Text>
-          <View style={styles.youtubeResultSource}>
-            <Ionicons name="logo-youtube" size={14} color="#FF3B30" />
-            <Text style={styles.youtubeResultSourceText}>YouTube Music</Text>
-          </View>
-        </View>
-        <Ionicons name="play-circle-outline" size={23} color={Colors.subtext} />
-      </Pressable>
-    ),
-    [handleYoutubeResultPress]
-  );
-
-  const renderYoutubeResult = useCallback(
-    ({ item }: { item: Song }) => getYoutubeResultElement(item),
-    [getYoutubeResultElement]
-  );
-
-  const youtubeHighlightSectionNode = useMemo(() => {
-    if (youtubePreviewResults.length === 0) return null;
-
-    return (
-      <View style={styles.youtubeHighlightSection}>
-        <View style={styles.youtubeHighlightHeader}>
-          <View style={styles.youtubeHighlightTitleWrap}>
-            <View style={styles.youtubeHighlightIcon}>
-              <Ionicons name="logo-youtube" size={18} color="#FFFFFF" />
-            </View>
-            <View style={styles.youtubeHighlightTextWrap}>
-              <Text style={styles.youtubeHighlightTitle}>YouTube Music</Text>
-              <Text style={styles.youtubeHighlightMeta} numberOfLines={1}>
-                {youtubeMusicResults.length} more results
-              </Text>
-            </View>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Show all YouTube Music results"
-            onPress={handleShowYoutubeResults}
-            style={({ pressed }) => [
-              styles.youtubeHighlightAction,
-              pressed && styles.youtubeHighlightActionPressed,
-            ]}
-          >
-            <Text style={styles.youtubeHighlightActionText}>Show all</Text>
-          </Pressable>
-        </View>
-        {youtubePreviewResults.map((item) => (
-          <View key={`youtube-preview-${item.id}`} style={styles.youtubePreviewRowWrap}>
-            {getYoutubeResultElement(item)}
-          </View>
-        ))}
-      </View>
-    );
-  }, [
-    getYoutubeResultElement,
-    handleShowYoutubeResults,
-    youtubeMusicResults.length,
-    youtubePreviewResults,
-  ]);
 
   const handleArtistPress = useCallback(
     (artist: ArtistResult) => {
@@ -1574,6 +1489,7 @@ function useSearchScreenView() {
         album.language,
       ].filter((value): value is string => Boolean(value));
       const isYt = isYouTubeCollectionResult(album.id, album.url, album.description);
+      const imageUrl = isYt ? normalizeYouTubeArtworkUrl(getBestImageUrl(album.image)) : getBestImageUrl(album.image);
       const meta = album.songCount > 0
         ? `${album.songCount} songs`
         : metaParts.join(" · ") || "Album";
@@ -1597,7 +1513,7 @@ function useSearchScreenView() {
                 link: album.url || "",
                 title: album.name,
                 description: album.description || meta,
-                cover: getBestImageUrl(album.image),
+                cover: imageUrl,
                 songCount: String(Math.max(0, album.songCount || 0)),
               },
             }, {
@@ -1609,7 +1525,7 @@ function useSearchScreenView() {
           <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
             <Image
               recyclingKey={`album-${album.id}`}
-              source={{ uri: getBestImageUrl(album.image) }}
+              source={{ uri: imageUrl }}
               style={styles.playlistGridImage}
               contentFit="cover"
               transition={160}
@@ -1621,11 +1537,7 @@ function useSearchScreenView() {
               style={StyleSheet.absoluteFill}
             />
             <View pointerEvents="none" style={styles.brandCoverBadge}>
-              {isYt ? (
-                <Ionicons name="videocam-outline" size={15} color="#FFFFFF" />
-              ) : (
-                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-              )}
+              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
             </View>
           </View>
           <View style={styles.playlistGridContent}>
@@ -1657,6 +1569,7 @@ function useSearchScreenView() {
       const staggerOffset = staggerPattern[seed % staggerPattern.length];
       const tilt = tiltPattern[(Math.floor(seed / 7)) % tiltPattern.length];
       const isYt = isYouTubeCollectionResult(playlist.id, playlist.url, playlist.description);
+      const imageUrl = isYt ? normalizeYouTubeArtworkUrl(getBestImageUrl(playlist.image)) : getBestImageUrl(playlist.image);
       const meta = playlist.songCount > 0
         ? `${Math.max(0, playlist.songCount || 0)} songs`
         : playlist.language || playlist.description || "Playlist";
@@ -1679,7 +1592,7 @@ function useSearchScreenView() {
                 link: playlist.url || "",
                 title: playlist.name,
                 description: playlist.description || meta,
-                cover: getBestImageUrl(playlist.image),
+                cover: imageUrl,
                 songCount: String(Math.max(0, playlist.songCount || 0)),
               },
             }, {
@@ -1691,9 +1604,9 @@ function useSearchScreenView() {
           <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
             <Image
               recyclingKey={playlist.id}
-              source={{ uri: getBestImageUrl(playlist.image) }}
+              source={{ uri: imageUrl }}
               style={styles.playlistGridImage}
-              contentFit="contain"
+              contentFit="cover"
               transition={160}
             />
             <LinearGradient
@@ -1703,11 +1616,7 @@ function useSearchScreenView() {
               style={StyleSheet.absoluteFill}
             />
             <View pointerEvents="none" style={styles.brandCoverBadge}>
-              {isYt ? (
-                <Ionicons name="videocam-outline" size={15} color="#FFFFFF" />
-              ) : (
-                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-              )}
+              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
             </View>
           </View>
           <View style={styles.playlistGridContent}>
@@ -1886,66 +1795,6 @@ function useSearchScreenView() {
               contentContainerStyle={styles.filterRowContent}
             />
           </View>
-          {hasYoutubeResults ? (
-            <View style={styles.sourceSwitchWrap}>
-              <View style={styles.sourceSwitchTrack}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Show Mavrixfy search results"
-                  onPress={handleShowAppResults}
-                  style={[
-                    styles.sourceSwitchOption,
-                    resultFilter !== "youtube" && styles.sourceSwitchOptionActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.sourceSwitchText,
-                      resultFilter !== "youtube" && styles.sourceSwitchTextActive,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    App
-                  </Text>
-                  <Text
-                    style={[
-                      styles.sourceSwitchCount,
-                      resultFilter !== "youtube" && styles.sourceSwitchCountActive,
-                    ]}
-                  >
-                    {appResultCount}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Show YouTube Music search results"
-                  onPress={handleShowYoutubeResults}
-                  style={[
-                    styles.sourceSwitchOption,
-                    resultFilter === "youtube" && styles.sourceSwitchOptionYoutube,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.sourceSwitchText,
-                      resultFilter === "youtube" && styles.sourceSwitchTextActive,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    YT
-                  </Text>
-                  <Text
-                    style={[
-                      styles.sourceSwitchCount,
-                      resultFilter === "youtube" && styles.sourceSwitchCountActive,
-                    ]}
-                  >
-                    {youtubeMusicResults.length}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
 
           {searchLoading ? (
             <View style={styles.loadingContainer}>
@@ -1956,28 +1805,6 @@ function useSearchScreenView() {
               <Text style={styles.emptyText}>{`No results for "${searchDisplayQuery}"`}</Text>
               <Text style={styles.emptySubtext}>Check the spelling, or search for something else.</Text>
             </View>
-          ) : resultFilter === "youtube" ? (
-            <FlatList
-              ref={resultsYoutubeListRef}
-              key={`yt-${resultDataKey}`}
-              data={showYoutubeResults ? youtubeMusicResults : []}
-              keyExtractor={(item) => item.id}
-              renderItem={renderYoutubeResult}
-              style={styles.scrollView}
-              contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              onScroll={handleHeaderScroll}
-              scrollEventThrottle={16}
-              initialNumToRender={10}
-              maxToRenderPerBatch={8}
-              windowSize={7}
-              ListEmptyComponent={
-                <View style={styles.emptyInline}>
-                  <Text style={styles.emptyInlineText}>No YouTube results found.</Text>
-                </View>
-              }
-            />
           ) : resultFilter === "playlists" ? (
             <FlatList
               ref={resultsPlaylistsListRef}
@@ -2046,9 +1873,8 @@ function useSearchScreenView() {
               scrollEventThrottle={16}
             >
               <View style={styles.emptyInline}>
-                <Text style={styles.emptyInlineText}>No app results found. Try YouTube Music.</Text>
+                <Text style={styles.emptyInlineText}>No results found.</Text>
               </View>
-              {youtubeHighlightSectionNode}
             </ScrollView>
           ) : (
             <FlatList
@@ -2067,7 +1893,7 @@ function useSearchScreenView() {
               maxToRenderPerBatch={8}
               windowSize={7}
               ListFooterComponent={
-                showAlbumResults || showArtistResults || showPlaylistResults || showYoutubePreviewSection ? (
+                showAlbumResults || showArtistResults || showPlaylistResults ? (
                   <>
                     {showAlbumResults ? (
                       <View style={styles.sectionBlock}>
@@ -2124,7 +1950,6 @@ function useSearchScreenView() {
                         </View>
                       </View>
                     ) : null}
-                    {showYoutubePreviewSection ? youtubeHighlightSectionNode : null}
                   </>
                 ) : null
               }
@@ -2326,68 +2151,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 8,
   },
-  sourceSwitchWrap: {
-    paddingHorizontal: 16,
-    paddingBottom: 6,
-    alignItems: "flex-end",
-  },
-  sourceSwitchLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-  },
-  sourceSwitchLabel: {
-    color: Colors.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
-  sourceSwitchTrack: {
-    width: 148,
-    minHeight: 30,
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 2,
-    gap: 2,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(255,255,255,0.05)",
-  },
-  sourceSwitchOption: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 24,
-    borderRadius: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 6,
-    gap: 4,
-  },
-  sourceSwitchOptionActive: {
-    backgroundColor: Colors.primary,
-  },
-  sourceSwitchOptionYoutube: {
-    backgroundColor: "#FF3B30",
-  },
-  sourceSwitchText: {
-    minWidth: 0,
-    color: Colors.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_700Bold",
-  },
-  sourceSwitchTextActive: {
-    color: "#FFFFFF",
-  },
-  sourceSwitchCount: {
-    color: Colors.subtext,
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-    fontVariant: ["tabular-nums"],
-  },
-  sourceSwitchCountActive: {
-    color: "#FFFFFF",
-  },
   resultsContent: { paddingTop: 8 },
   sectionBlock: {
     paddingHorizontal: 16,
@@ -2453,120 +2216,6 @@ const styles = StyleSheet.create({
     color: Colors.subtext,
     fontSize: 12.5,
     fontFamily: "Inter_500Medium",
-  },
-
-  // ── YouTube discovery results ───────────────────────────────────────────────
-  youtubeResultRow: {
-    minHeight: 72,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 13,
-  },
-  youtubeResultRowPressed: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-  },
-  youtubeResultImage: {
-    width: 52,
-    height: 52,
-    borderRadius: 4,
-    backgroundColor: Colors.surface,
-  },
-  youtubeResultInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  youtubeResultTitle: {
-    color: Colors.text,
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-  },
-  youtubeResultArtist: {
-    marginTop: 2,
-    color: Colors.subtext,
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-  },
-  youtubeResultSource: {
-    marginTop: 5,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  youtubeResultSourceText: {
-    color: Colors.subtext,
-    fontSize: 11,
-    fontFamily: "Inter_500Medium",
-  },
-  youtubeHighlightSection: {
-    marginTop: 10,
-    marginBottom: 22,
-    paddingTop: 12,
-    paddingBottom: 4,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "rgba(255,59,48,0.30)",
-    backgroundColor: "rgba(255,59,48,0.08)",
-  },
-  youtubeHighlightHeader: {
-    minHeight: 44,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  youtubeHighlightTitleWrap: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  youtubeHighlightIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FF3B30",
-  },
-  youtubeHighlightTextWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  youtubeHighlightTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontFamily: "Inter_800ExtraBold",
-  },
-  youtubeHighlightMeta: {
-    marginTop: 2,
-    color: Colors.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-  },
-  youtubeHighlightAction: {
-    minHeight: 32,
-    borderRadius: 6,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    backgroundColor: "rgba(255,255,255,0.10)",
-  },
-  youtubeHighlightActionPressed: {
-    opacity: 0.75,
-  },
-  youtubeHighlightActionText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontFamily: "Inter_700Bold",
-  },
-  youtubePreviewRowWrap: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.08)",
   },
 
   // ── Playlist grid ────────────────────────────────────────────────────────────

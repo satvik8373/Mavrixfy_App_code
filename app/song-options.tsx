@@ -21,6 +21,7 @@ import { showGlobalToast } from "@/app/_layout";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Song, getBestImageUrl } from "@/lib/musicData";
+import { isYouTubeBackedSong } from "@/lib/downloads/sourceGuards";
 import { addSongToPlaylist, getUserPlaylists, removeSongFromPlaylist, UserPlaylist } from "@/lib/storage";
 import {
   getUserFirestorePlaylists,
@@ -59,10 +60,15 @@ function parseSongParam(value: string | string[] | undefined): Song | null {
       coverUrl: parsed.coverUrl || "",
       genre: parsed.genre || "",
       audioUrl: parsed.audioUrl || "",
+      downloadUrl: parsed.downloadUrl,
       year: parsed.year,
       language: parsed.language,
       source: parsed.source,
       playCount: parsed.playCount,
+      videoId: parsed.videoId,
+      youtubeVideoId: parsed.youtubeVideoId,
+      youtubeVisualVideoId: parsed.youtubeVisualVideoId,
+      youtubeVideoType: parsed.youtubeVideoType,
     };
   } catch {
     return null;
@@ -486,7 +492,8 @@ export default function SongOptionsScreen() {
   const showDownload = params.showDownload !== "0";
   const canShowDownload =
     showDownload &&
-    Boolean(song);
+    Boolean(song) &&
+    !isYouTubeBackedSong(song);
   const canRemove = params.canRemove === "1";
   const optionContext = Array.isArray(params.optionContext) ? params.optionContext[0] : params.optionContext;
   const playlistIdParam = Array.isArray(params.playlistId) ? params.playlistId[0] : params.playlistId;

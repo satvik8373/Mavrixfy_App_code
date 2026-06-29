@@ -81,7 +81,8 @@ function artistFromRaw(raw: any): string {
 function getAudioUrlFromRaw(raw: any): string {
   const sources = [raw.downloadUrl, raw.audioUrl, raw.url];
   for (const source of sources) {
-    const url = getBestUrl(source, ["320kbps", "160kbps", "96kbps"]);
+    // Always prioritize highest quality (320kbps) for best audio - official JioSaavn method
+    const url = getBestUrl(source, ["320kbps", "160kbps", "96kbps", "48kbps"]);
     if (url) return url;
   }
   return "";

@@ -6,7 +6,7 @@
  * delegating to the queue.
  */
 
-import { Song } from "@/lib/musicData";
+import { getBestAudioUrlWithQuality, Song } from "@/lib/musicData";
 import {
   DownloadItem,
   DownloadPreferences,
@@ -53,12 +53,36 @@ import {
   addCollectionRef,
 } from "@/lib/downloads/trackReferences";
 import { logger } from "@/lib/logger";
+import { isYouTubeBackedSong } from "@/lib/downloads/sourceGuards";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type DownloadResult =
   | { ok: true }
   | { ok: false; reason: string };
+
+type DownloadableSongSource = Song & {
+  url?: unknown;
+  uri?: unknown;
+  streamUrl?: unknown;
+};
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function resolveDownloadAudioUrl(song: Song, quality: DownloadPreferences["quality"]): string {
+  const source = song as DownloadableSongSource;
+  return (
+    getBestAudioUrlWithQuality(song.downloadUrl, quality) ||
+    firstString(source.audioUrl, source.streamUrl, source.uri, source.url)
+  );
+}
 
 // ─── Re-export event subscription ────────────────────────────────────────────
 
@@ -87,6 +111,15 @@ export async function downloadSong(
   }
 ): Promise<DownloadResult> {
   try {
+    if (isYouTubeBackedSong(song)) {
+      return { ok: false, reason: "YouTube songs are streaming only and cannot be downloaded." };
+    }
+
+    const audioUrl = resolveDownloadAudioUrl(song, prefs.quality);
+    if (!audioUrl) {
+      return { ok: false, reason: "No downloadable audio URL found for this song." };
+    }
+
     // 1. Check entitlement.
     const entitlement = await getDownloadEntitlement(uid);
     if (!entitlement.canDownload) {
@@ -157,7 +190,7 @@ export async function downloadSong(
       artist: song.artist,
       album: song.album,
       coverUrl: song.coverUrl,
-      audioUrl: song.audioUrl,
+      audioUrl,
       duration: song.duration,
       status: "queued",
       progress: 0,
@@ -196,6 +229,10 @@ export async function downloadCollection(
   options?: { userCountry?: string | null }
 ): Promise<{ queued: number; skipped: number; failed: number }> {
   const results = await Promise.all(songs.map(async (song) => {
+    if (isYouTubeBackedSong(song)) {
+      return "skipped" as const;
+    }
+
     const result = await downloadSong(song, uid, prefs, {
       collectionId,
       userCountry: options?.userCountry,

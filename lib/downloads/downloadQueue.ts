@@ -133,6 +133,14 @@ async function executeDownload(songId: string): Promise<void> {
 
   // Select audio URL based on quality preference
   const audioUrl = getAudioUrlByQuality(item.audioUrl, item.quality);
+  if (!audioUrl) {
+    await updateStatus(songId, "failed", {
+      failureReason: "No downloadable audio URL found",
+      failedAt: new Date().toISOString(),
+    });
+    releaseSlot(songId);
+    return;
+  }
 
   const handle = createDownloadResumable(
     audioUrl,

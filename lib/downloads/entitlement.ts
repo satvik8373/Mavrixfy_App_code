@@ -18,6 +18,17 @@ import { logger } from "@/lib/logger";
 
 // ─── Entitlement ──────────────────────────────────────────────────────────────
 
+function isPermissionDeniedError(err: unknown): boolean {
+  const error = err as { code?: unknown; message?: unknown };
+  return (
+    error?.code === "permission-denied" ||
+    (
+      typeof error?.message === "string" &&
+      error.message.toLowerCase().includes("missing or insufficient permissions")
+    )
+  );
+}
+
 /**
  * Returns the download entitlement for a user.
  * All signed-in users get full download access.
@@ -94,7 +105,12 @@ export async function getTrackRights(songId: string): Promise<TrackRights> {
       rightsVersion: typeof d?.rightsVersion === "number" ? d.rightsVersion : 1,
     };
   } catch (err) {
-    logger.error("[Entitlement] getTrackRights failed", err);
+    if (isPermissionDeniedError(err)) {
+      logger.debug("[Entitlement] Track rights unavailable; using default permissions.", { songId });
+      return permissive;
+    }
+
+    logger.warn("[Entitlement] getTrackRights failed; using default permissions.", err);
     return permissive;
   }
 }
