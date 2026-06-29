@@ -387,24 +387,105 @@ function mergeHomeCategorySources(
   youtubeCategories: YouTubeMusicHomeCategoryData[],
   limit: number
 ): HomeCategoryData[] {
-  // Map YouTube categories directly to pure YouTube rows
-  const youtubeRows: HomeCategoryData[] = youtubeCategories
-    .map((category) => {
-      const results = category.results.map(toYouTubeHomeCategoryItem).slice(0, limit);
-      return { id: category.id, title: category.title, results };
-    })
-    .filter((row) => row.results.length > 0);
+  // Extract all JioSaavn items as a fallback pool
+  const allJioItems: HomeCategoryItem[] = jioCategories.flatMap((c) =>
+    c.results.map(toJioSaavnHomeCategoryItem)
+  );
 
-  // Map JioSaavn categories directly to pure JioSaavn rows
-  const jioRows: HomeCategoryData[] = jioCategories
-    .map((category) => {
-      const results = category.results.map(toJioSaavnHomeCategoryItem).slice(0, limit);
-      return { id: category.id, title: HOME_JIOSAAVN_TITLES[category.id] ?? category.title, results };
-    })
-    .filter((row) => row.results.length > 0);
+  // Extract all YouTube items as a fallback pool
+  const allYoutubeItems: HomeCategoryItem[] = youtubeCategories.flatMap((c) =>
+    c.results.map(toYouTubeHomeCategoryItem)
+  );
 
-  // Place all YouTube rows first, followed by JioSaavn rows to ensure YouTube dominancy
-  return [...youtubeRows, ...jioRows];
+  const mergedRows: HomeCategoryData[] = [];
+  const processedYouTubeIds = new Set<string>();
+  const processedJioIds = new Set<string>();
+
+  // Helper to interleave items with 60% YouTube (3 items) and 40% JioSaavn (2 items)
+  const createMixedResults = (ytItems: HomeCategoryItem[], jioItems: HomeCategoryItem[]): HomeCategoryItem[] => {
+    const merged: HomeCategoryItem[] = [];
+    const seen = new Set<string>();
+
+    const append = (item: HomeCategoryItem | undefined) => {
+      if (!item || merged.length >= limit) return;
+      const key = `${item.source}:${item.id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(item);
+    };
+
+    let ytIdx = 0;
+    let jioIdx = 0;
+    const fallbackYt = ytItems.length > 0 ? ytItems : allYoutubeItems;
+    const fallbackJio = jioItems.length > 0 ? jioItems : allJioItems;
+
+    while (merged.length < limit && (ytIdx < fallbackYt.length || jioIdx < fallbackJio.length)) {
+      // 3 YouTube items
+      for (let i = 0; i < 3 && ytIdx < fallbackYt.length && merged.length < limit; i++) {
+        append(fallbackYt[ytIdx++]);
+      }
+      // 2 JioSaavn items
+      for (let i = 0; i < 2 && jioIdx < fallbackJio.length && merged.length < limit; i++) {
+        append(fallbackJio[jioIdx++]);
+      }
+      if (ytIdx >= fallbackYt.length && jioIdx >= fallbackJio.length) {
+        break;
+      }
+    }
+
+    // Fill remaining up to limit
+    if (merged.length < limit) {
+      [...fallbackYt, ...fallbackJio].forEach(append);
+    }
+
+    return merged;
+  };
+
+  // 1. Process matching categories first (exact ID match)
+  jioCategories.forEach((jioCat) => {
+    const matchingYt = youtubeCategories.find((y) => y.id === jioCat.id);
+    const ytItems = matchingYt ? matchingYt.results.map(toYouTubeHomeCategoryItem) : [];
+    const jioItems = jioCat.results.map(toJioSaavnHomeCategoryItem);
+
+    if (matchingYt) {
+      processedYouTubeIds.add(matchingYt.id);
+    }
+    processedJioIds.add(jioCat.id);
+
+    const title = HOME_JIOSAAVN_TITLES[jioCat.id] ?? jioCat.title;
+    const results = createMixedResults(ytItems, jioItems);
+    if (results.length > 0) {
+      mergedRows.push({ id: jioCat.id, title, results });
+    }
+  });
+
+  // 2. Process remaining YouTube categories (not yet processed)
+  youtubeCategories.forEach((ytCat) => {
+    if (processedYouTubeIds.has(ytCat.id)) return;
+    processedYouTubeIds.add(ytCat.id);
+
+    const ytItems = ytCat.results.map(toYouTubeHomeCategoryItem);
+    // Mix with general JioSaavn items as fallback so it's a mixed row!
+    const results = createMixedResults(ytItems, allJioItems);
+    if (results.length > 0) {
+      mergedRows.push({ id: ytCat.id, title: ytCat.title, results });
+    }
+  });
+
+  // 3. Process remaining JioSaavn categories (not yet processed)
+  jioCategories.forEach((jioCat) => {
+    if (processedJioIds.has(jioCat.id)) return;
+    processedJioIds.add(jioCat.id);
+
+    const jioItems = jioCat.results.map(toJioSaavnHomeCategoryItem);
+    // Mix with general YouTube items as fallback so it's a mixed row!
+    const results = createMixedResults(allYoutubeItems, jioItems);
+    if (results.length > 0) {
+      mergedRows.push({ id: jioCat.id, title: HOME_JIOSAAVN_TITLES[jioCat.id] ?? jioCat.title, results });
+    }
+  });
+
+  return mergedRows;
 }
 
 
@@ -1835,24 +1916,10 @@ function useHomeScreenInnerView() {
   }, [categories, selectedMood]);
 
   const orderedHomeCategories = useMemo<HomeCategoryData[]>(() => {
-    const categoryById = new Map<string, HomeCategoryData>();
-    filteredCategories.forEach((cat) => categoryById.set(cat.id, cat));
-
-    // Preferred order first, then any extras the service returned
-    const preferred = mapFilter(HOME_CATEGORY_SECTION_ORDER, (id) => {
-        const cat = categoryById.get(id);
-        if (!cat || cat.results.length === 0) return null;
-        return { ...cat, title: HOME_JIOSAAVN_TITLES[id] ?? cat.title };
-      }, (cat): cat is HomeCategoryData => Boolean(cat));
-
-    const preferredIds = new Set(preferred.map((c) => c.id));
-    const extras = filterMap(
-      filteredCategories,
-      (c) => !preferredIds.has(c.id) && c.results.length > 0,
-      (c) => ({ ...c, title: HOME_JIOSAAVN_TITLES[c.id] ?? c.title })
-    );
-
-    return [...preferred, ...extras];
+    return filteredCategories.map((c) => ({
+      ...c,
+      title: HOME_JIOSAAVN_TITLES[c.id] ?? c.title,
+    }));
   }, [filteredCategories]);
 
   const allCategoryRows = useMemo(() => {
@@ -1866,21 +1933,7 @@ function useHomeScreenInnerView() {
     if (selectedMood) {
       return allCategoryRows.slice(0, HOME_MAX_MOOD_BROWSE_SECTIONS);
     }
-
-    const rowById = new Map(allCategoryRows.map((cat) => [cat.id, cat]));
-    const preferred = mapFilter(
-      HOME_DEFAULT_BROWSE_CATEGORY_IDS,
-      (id) => rowById.get(id) ?? null,
-      (cat): cat is HomeCategoryData => Boolean(cat)
-    );
-    const preferredIds = new Set(preferred.map((cat) => cat.id));
-    const fallback = filterMap(
-      allCategoryRows,
-      (cat) => !preferredIds.has(cat.id),
-      (cat) => cat
-    );
-
-    return [...preferred, ...fallback].slice(0, HOME_MAX_DEFAULT_BROWSE_SECTIONS);
+    return allCategoryRows;
   }, [allCategoryRows, selectedMood]);
 
   const publicPlaylistsForSection = useMemo(

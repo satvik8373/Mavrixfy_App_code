@@ -1,4 +1,4 @@
-import { Innertube, Platform } from "youtubei.js";
+import { Innertube, Platform, UniversalCache } from "youtubei.js";
 import vm from "node:vm";
 
 let youtubePromise = null;
@@ -28,6 +28,7 @@ export async function getYoutube() {
       retrieve_player: true,
       cookie: process.env.YOUTUBE_COOKIE || undefined,
       po_token: process.env.YOUTUBE_PO_TOKEN || undefined,
+      cache: new UniversalCache(false),
     });
   }
 
