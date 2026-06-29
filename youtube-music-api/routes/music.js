@@ -511,18 +511,19 @@ router.get("/search", asyncRoute(async (req, res) => {
   if (!term) throw httpError(400, "Missing search query");
 
   const limit = parsePositiveInt(req.query.limit, 20, 50);
+  const requestedType = mapFilterToType(req.query.filter);
   const yt = await getYoutube();
-  const search = await yt.music.search(term);
+  const search = await yt.music.search(term, { type: requestedType });
 
   const results = [];
-  if (search.top_result) {
+  if (!req.query.filter && search.top_result) {
     const topNorm = normalizeSearchItem(search.top_result);
     if (topNorm) results.push(topNorm);
   }
 
-  const shelf = (search.contents || []).flatMap((section) => section?.contents || []);
+  const shelf = shelfItems(search, requestedType);
   for (const item of shelf) {
-    const norm = normalizeSearchItem(item);
+    const norm = normalizeSearchItem(item, requestedType);
     if (norm) results.push(norm);
   }
 

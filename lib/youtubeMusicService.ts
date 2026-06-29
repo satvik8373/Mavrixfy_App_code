@@ -730,6 +730,77 @@ export async function searchYouTubeMusicVideos(
   }
 }
 
+/**
+ * Search YouTube Music for playlists
+ */
+export async function searchYouTubeMusicPlaylists(
+  query: string,
+  limit = 10,
+  signal?: AbortSignal
+): Promise<YouTubeMusicPlaylistCard[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:search:playlist:${limit}:${q.toLowerCase()}`;
+  const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
+  if (cached) return cached;
+
+  try {
+    const json = await fetchFirstJson<any>(
+      getEndpointCandidates(
+        "/search",
+        "/search",
+        getSearchQueryCandidates(q, "playlists", limit)
+      ),
+      signal
+    );
+    const results = getSearchResultItems(json);
+    const playlists: YouTubeMusicPlaylistCard[] = mapFilter(
+      results,
+      (item: any): YouTubeMusicPlaylistCard | null => {
+        const id = readString(item.playlistId || item.browseId || item.id);
+        const name = readString(item.title || item.name);
+        if (!id || !name) return null;
+
+        const resultType = readString(item.resultType || item.category).toLowerCase();
+        const looksLikePlaylistId =
+          id.startsWith("PL") ||
+          id.startsWith("VL") ||
+          id.startsWith("RDCLAK") ||
+          id.startsWith("RDTMAK") ||
+          id.startsWith("OLAK");
+        if (!looksLikePlaylistId && (resultType.includes("song") || resultType.includes("video") || readString(item.videoId))) {
+          return null;
+        }
+
+        const thumbnails = normalizeThumbnails(item.thumbnails || item.thumbnail);
+        const imageUrl = getBestThumbnailUrl(thumbnails);
+
+        return {
+          id,
+          name,
+          imageUrl,
+          songCount: Number(item.trackCount || item.itemCount) || undefined,
+          author: readString(item.author || item.owner?.name) || "YouTube Music",
+          category: "Search",
+          description: readString(item.description) || undefined,
+          kind: "featured",
+        };
+      },
+      (p: YouTubeMusicPlaylistCard | null): p is YouTubeMusicPlaylistCard => p !== null
+    );
+
+    if (playlists.length > 0) {
+      await setCache(cacheKey, playlists);
+    }
+    return playlists;
+  } catch (error) {
+    if (isAbortLikeError(error)) return [];
+    logger.warn("[YouTube Music] Playlist search failed:", error);
+    return [];
+  }
+}
+
 export async function getYouTubeMusicAudioStream(
   videoId: string,
   signal?: AbortSignal
@@ -1138,41 +1209,137 @@ async function fetchRealHomeShelves(options?: { forceRefresh?: boolean }): Promi
  * Maps each shelf from music.youtube.com directly to a HomeCategoryData row.
  * Only playlist shelves are returned here (song shelves go to getYouTubeMusicLatestIndiaSongs).
  */
+/**
+ * Get YouTube Music categories.
+ * Queries YouTube Music playlists using search terms tailored to Indian music for each category ID.
+ * Falls back to real home feed shelves if searches return no results.
+ */
 export async function getHomeYouTubeMusicCategories(options?: {
   forceRefresh?: boolean;
   limitPerCategory?: number;
   categoryIds?: string[];
 }): Promise<YouTubeMusicHomeCategoryData[]> {
   const limit = Math.min(options?.limitPerCategory ?? 10, 20);
+  const ids = options?.categoryIds && options.categoryIds.length > 0
+    ? options.categoryIds
+    : [
+        "featured-for-you",
+        "latest-india",
+        "new-releases",
+        "most-played",
+        "popular-now",
+        "indias-biggest-hits",
+        "romance-right-now",
+        "bollywood-indian",
+        "trending-community",
+        "summer",
+        "chill-vibes",
+      ];
 
-  const shelves = await fetchRealHomeShelves({ forceRefresh: options?.forceRefresh });
+  const CATEGORY_SEARCH_QUERIES: Record<string, { query: string; title: string }> = {
+    "featured-for-you": { query: "Bollywood Hitlist Hashtag Hits India playlist", title: "Featured playlists for you" },
+    "latest-india": { query: "latest Indian songs Hindi Bollywood playlist", title: "Latest Indian hits" },
+    "new-releases": { query: "new release Hindi Bollywood songs playlist India", title: "New releases" },
+    "most-played": { query: "most played songs India Hindi Bollywood playlist", title: "Most played in India" },
+    "popular-now": { query: "popular now India songs Hindi Bollywood playlist", title: "Popular right now" },
+    "indias-biggest-hits": { query: "India biggest hits Gujarati Hitlist Bollywood Romance Hitlist playlist", title: "India's biggest hits" },
+    "romance-right-now": { query: "Bollywood love aaj kal I-Pop romance playlist", title: "Romance Right Now" },
+    "bollywood-indian": { query: "Bollywood Indian hits playlist latest", title: "Bollywood & Indian" },
+    "trending-community": { query: "trending community playlists India music", title: "Trending community playlists" },
+    summer: { query: "summer songs India Hindi Bollywood playlist", title: "Hello, Summer! ☀️🍉" },
+    "chill-vibes": { query: "Hindi lofi chill playlist India", title: "Chill & Lo-fi" },
+  };
 
-  const categoryRows: YouTubeMusicHomeCategoryData[] = [];
-  const seenShelfTitles = new Set<string>();
+  const realHomeCategories: YouTubeMusicHomeCategoryData[] = [];
+  try {
+    const shelves = await fetchRealHomeShelves({ forceRefresh: options?.forceRefresh });
+    const seenShelfTitles = new Set<string>();
 
-  for (const shelf of shelves) {
-    // Only show playlist shelves in category rows (songs appear in Quick Picks)
-    if (shelf.contentType === "song") continue;
-    const titleKey = shelf.title.toLowerCase().trim();
-    if (seenShelfTitles.has(titleKey)) continue;
-    seenShelfTitles.add(titleKey);
+    for (const shelf of shelves) {
+      if (shelf.contentType === "song") continue;
+      const titleKey = shelf.title.toLowerCase().trim();
+      if (seenShelfTitles.has(titleKey)) continue;
+      seenShelfTitles.add(titleKey);
 
-    const results = compactMap(
-      shelf.contents.slice(0, limit),
-      (item: any) => parseHomePlaylistCard(item)
-    );
-    if (results.length === 0) continue;
+      const results = compactMap(
+        shelf.contents.slice(0, limit),
+        (item: any) => parseHomePlaylistCard(item)
+      );
+      if (results.length === 0) continue;
 
-    // Generate a stable ID from the shelf title
-    const id = titleKey
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || `shelf-${categoryRows.length}`;
+      const id = titleKey
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40) || `shelf-${realHomeCategories.length}`;
 
-    categoryRows.push({ id, title: shelf.title, results });
+      realHomeCategories.push({ id, title: shelf.title, results });
+    }
+  } catch (error) {
+    logger.warn("[YouTube Music] Home feed playlists fallback needed:", error);
   }
 
-  return categoryRows;
+  const seenRealTitles = new Set(realHomeCategories.map((category) => category.title.toLowerCase().trim()));
+  const missingIds = ids.filter((id) => {
+    const title = CATEGORY_SEARCH_QUERIES[id]?.title.toLowerCase().trim();
+    return title ? !seenRealTitles.has(title) : true;
+  });
+
+  const categoryPromises = ids.map(async (id) => {
+    if (!missingIds.includes(id)) return null;
+    const config = CATEGORY_SEARCH_QUERIES[id];
+    if (!config) {
+      return null;
+    }
+
+    try {
+      const seen = new Set<string>();
+      const results = (await searchYouTubeMusicPlaylists(config.query, limit * 2)).filter((playlist) => {
+        if (seen.has(playlist.id)) return false;
+        seen.add(playlist.id);
+        return true;
+      }).slice(0, limit);
+
+      if (results.length > 0) {
+        return {
+          id,
+          title: config.title,
+          results,
+        };
+      }
+    } catch (err) {
+      logger.warn(`[YouTube Music] Failed to fetch search category ${id}:`, err);
+    }
+    return null;
+  });
+
+  const searchedCategories = (await Promise.all(categoryPromises)).filter(
+    (c): c is YouTubeMusicHomeCategoryData => c !== null
+  );
+
+  const priorityTerms = [
+    "featured",
+    "latest",
+    "new release",
+    "most played",
+    "popular",
+    "biggest",
+    "romance",
+    "bollywood",
+    "trending",
+  ];
+  const getPriorityScore = (category: YouTubeMusicHomeCategoryData): number => {
+    const key = `${category.id} ${category.title}`.toLowerCase();
+    const index = priorityTerms.findIndex((term) => key.includes(term));
+    return index >= 0 ? index : priorityTerms.length;
+  };
+
+  const seenOutput = new Set<string>();
+  return [...realHomeCategories, ...searchedCategories].filter((category) => {
+    const key = category.title.toLowerCase().trim();
+    if (!key || seenOutput.has(key)) return false;
+    seenOutput.add(key);
+    return true;
+  }).sort((a, b) => getPriorityScore(a) - getPriorityScore(b));
 }
 
 
@@ -1191,57 +1358,108 @@ export async function getYouTubeMusicLatestIndiaSongs(options?: {
     if (cached && cached.length > 0) return cached.slice(0, limit);
   }
 
-  const shelves = await fetchRealHomeShelves({ forceRefresh: options?.forceRefresh });
+  try {
+    const shelves = await fetchRealHomeShelves({ forceRefresh: options?.forceRefresh });
 
-  const songs: Song[] = [];
-  const seenIds = new Set<string>();
+    const songs: Song[] = [];
+    const seenIds = new Set<string>();
 
-  for (const shelf of shelves) {
-    if (shelf.contentType !== "song") continue;
-    for (const item of shelf.contents) {
-      const song = parseHomeSongItem(item);
-      if (!song || seenIds.has(song.id)) continue;
-      seenIds.add(song.id);
-      songs.push(song);
+    for (const shelf of shelves) {
+      if (shelf.contentType !== "song") continue;
+      for (const item of shelf.contents) {
+        const song = parseHomeSongItem(item);
+        if (!song || seenIds.has(song.id)) continue;
+        seenIds.add(song.id);
+        songs.push(song);
+        if (songs.length >= limit) break;
+      }
       if (songs.length >= limit) break;
     }
-    if (songs.length >= limit) break;
+
+    if (songs.length > 0) {
+      void setCache(HOME_FEED_SONG_SHELF_CACHE_KEY, songs);
+    }
+    return songs;
+  } catch (error) {
+    logger.warn("[YouTube Music] Home feed songs fallback failed:", error);
   }
 
-  if (songs.length > 0) {
-    void setCache(HOME_FEED_SONG_SHELF_CACHE_KEY, songs);
+  try {
+    const songs = await searchYouTubeMusic("trending hindi songs", "song", limit);
+    if (songs.length > 0) {
+      void setCache(HOME_FEED_SONG_SHELF_CACHE_KEY, songs);
+      return songs;
+    }
+  } catch (err) {
+    logger.warn("[YouTube Music] Failed to search latest Indian songs:", err);
   }
-  return songs;
+
+  return [];
 }
 
 /**
  * Get YouTube Music trending/chart playlists.
- * Now reads from the real home feed instead of the /charts search endpoint.
+ * Queries the /charts endpoint to retrieve real Indian charts/playlists from YouTube Music.
  */
 export async function getYouTubeMusicTrendingPlaylists(
-  _country: string = "IN",
+  country: string = "IN",
   options?: { forceRefresh?: boolean }
 ): Promise<YouTubeMusicPlaylistCard[]> {
-  const shelves = await fetchRealHomeShelves({ forceRefresh: options?.forceRefresh });
-
-  const trendingPlaylists: YouTubeMusicPlaylistCard[] = [];
-  const seenIds = new Set<string>();
-  let playlistShelfCount = 0;
-
-  for (const shelf of shelves) {
-    if (shelf.contentType === "song") continue;
-    if (playlistShelfCount >= 2) break; // Use first 2 playlist shelves for trending
-    playlistShelfCount++;
-
-    for (const item of shelf.contents) {
-      const card = parseHomePlaylistCard(item);
-      if (!card || seenIds.has(card.id)) continue;
-      seenIds.add(card.id);
-      trendingPlaylists.push(card);
-    }
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:trending_playlists:v4:${country}`;
+  if (!options?.forceRefresh) {
+    const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
+    if (cached && cached.length > 0) return cached;
   }
 
-  return trendingPlaylists;
+  try {
+    const json = await fetchFirstJson<any>(
+      getEndpointCandidates("/charts", "/charts", `country=${encodeURIComponent(country)}`)
+    );
+    if (!json) return [];
+
+    const rawPlaylists = getChartPlaylistItems(json);
+
+    const playlists = mapFilter(
+      rawPlaylists,
+      (item: any) => {
+        const id = readString(item.playlistId || item.browseId || item.id);
+        const name = readString(item.title || item.name);
+        if (!id || !name) return null;
+
+        const thumbnails = normalizeThumbnails(item.thumbnails || item.thumbnail);
+        const imageUrl = getBestThumbnailUrl(thumbnails);
+
+        const result: YouTubeMusicPlaylistCard = {
+          id,
+          name,
+          imageUrl,
+          songCount: Number(item.trackCount || item.itemCount) || 50,
+          author: readString(item.author || item.owner?.name) || "YouTube Music",
+          category: readString(item.category) || "Charts",
+          description: readString(item.description) || undefined,
+          kind: "chart",
+        };
+        return result;
+      },
+      (p): p is YouTubeMusicPlaylistCard => p !== null
+    );
+
+    const seen = new Set<string>();
+    const uniquePlaylists = playlists.filter(p => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+
+    if (uniquePlaylists.length > 0) {
+      await setCache(cacheKey, uniquePlaylists);
+    }
+    return uniquePlaylists;
+  } catch (error) {
+    if (isAbortLikeError(error)) return [];
+    logger.warn("YouTube Music trending playlists error:", error);
+    return [];
+  }
 }
 
 /**

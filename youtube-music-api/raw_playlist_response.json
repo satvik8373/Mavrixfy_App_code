@@ -1,0 +1,72 @@
+{
+  "success": true,
+  "status_code": 200,
+  "data": {
+    "responseContext": {
+      "serviceTrackingParams": [
+        {
+          "service": "GFEEDBACK",
+          "params": [
+            {
+              "key": "has_unlimited_entitlement",
+              "value": "False"
+            },
+            {
+              "key": "browse_id",
+              "value": "VLRDCLAK5uy_n9F5Zg5wq9YV95ypcKdc1-1Gxh9Gg7FNg"
+            },
+            {
+              "key": "browse_id_prefix",
+              "value": ""
+            },
+            {
+              "key": "logged_in",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "service": "CSI",
+          "params": [
+            {
+              "key": "c",
+              "value": "WEB_REMIX"
+            },
+            {
+              "key": "cver",
+              "value": "1.20250219.01.00"
+            },
+            {
+              "key": "yt_li",
+              "value": "0"
+            },
+            {
+              "key": "GetBrowsePlaylistDetailPage_rid",
+              "value": "0x1343f2616f4dfa40"
+            }
+          ]
+        },
+        {
+          "service": "ECATCHER",
+          "params": [
+            {
+              "key": "client.version",
+              "value": "1.20000101"
+            },
+            {
+              "key": "client.name",
+              "value": "WEB_REMIX"
+            }
+          ]
+        }
+      ],
+      "responseId": "IhMIwIWLvc2slQMVjexVCR2b5BuU"
+    },
+    "trackingParams": "CAAQhGciEwjAhYu9zayVAxWN7FUJHZvkG5TKAQRnJIAn",
+    "microformat": {
+      "microformatDataRenderer": {
+        "noindex": true
+      }
+    }
+  }
+}
