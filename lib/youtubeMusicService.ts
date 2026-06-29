@@ -862,7 +862,8 @@ export async function getYouTubeMusicAudioStream(
 export async function getYouTubeMusicPlaylist(playlistId: string): Promise<YouTubeMusicPlaylist | null> {
   const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:playlist:${playlistId}`;
   const cached = await getCached<YouTubeMusicPlaylist>(cacheKey, CACHE_TTL_MS);
-  if (cached) return cached;
+  // Skip cache if it has no tracks — avoids serving stale empty responses from before a backend fix
+  if (cached && Array.isArray(cached.tracks) && cached.tracks.length > 0) return cached;
 
   try {
     const json = await fetchFirstJson<any>(
@@ -874,7 +875,10 @@ export async function getYouTubeMusicPlaylist(playlistId: string): Promise<YouTu
     if (!json) return null;
     const playlist = normalizePlaylistPayload(getResponsePayload(json, "playlist"), playlistId);
 
-    await setCache(cacheKey, playlist);
+    // Only cache if we actually got tracks
+    if (Array.isArray(playlist.tracks) && playlist.tracks.length > 0) {
+      await setCache(cacheKey, playlist);
+    }
     return playlist;
   } catch (error) {
     logger.error("YouTube Music playlist error:", error);
@@ -914,7 +918,8 @@ export async function getYouTubeMusicArtist(artistId: string): Promise<YouTubeMu
 export async function getYouTubeMusicAlbum(albumId: string): Promise<YouTubeMusicAlbum | null> {
   const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:album:${albumId}`;
   const cached = await getCached<YouTubeMusicAlbum>(cacheKey, CACHE_TTL_MS);
-  if (cached) return cached;
+  // Skip cache if it has no tracks — avoids serving stale empty responses from before a backend fix
+  if (cached && Array.isArray(cached.tracks) && cached.tracks.length > 0) return cached;
 
   try {
     const json = await fetchFirstJson<any>(
@@ -926,7 +931,10 @@ export async function getYouTubeMusicAlbum(albumId: string): Promise<YouTubeMusi
     if (!json) return null;
     const album = normalizeAlbumPayload(getResponsePayload(json, "album"), albumId);
 
-    await setCache(cacheKey, album);
+    // Only cache if we actually got tracks
+    if (Array.isArray(album.tracks) && album.tracks.length > 0) {
+      await setCache(cacheKey, album);
+    }
     return album;
   } catch (error) {
     logger.error("YouTube Music album error:", error);

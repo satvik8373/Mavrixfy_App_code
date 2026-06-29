@@ -227,13 +227,44 @@ function parseYearFromSubtitle(value) {
   return match?.[0] || undefined;
 }
 
+/**
+ * Extract track items from a youtubei.js Playlist or Album object.
+ * youtubei.js v17 changed the structure: `contents` is now a structured object
+ * with `item_groups[0].items` instead of a flat array. We handle both formats.
+ */
+function extractTrackItems(obj) {
+  const contents = obj?.contents;
+
+  // v17+ structure: contents is an object with item_groups
+  if (contents && !Array.isArray(contents) && typeof contents === "object") {
+    // Try contents.item_groups[0].items (MusicPlaylistShelf structure)
+    const groups = contents.item_groups;
+    if (Array.isArray(groups) && groups.length > 0) {
+      const items = groups[0]?.items || groups[0]?.contents || [];
+      if (Array.isArray(items) && items.length > 0) return items;
+    }
+    // Try contents.items directly
+    if (Array.isArray(contents.items) && contents.items.length > 0) return contents.items;
+    // Try contents.contents directly
+    if (Array.isArray(contents.contents) && contents.contents.length > 0) return contents.contents;
+  }
+
+  // Legacy flat array structure (v16 and below)
+  if (Array.isArray(contents)) return contents;
+
+  // Also try obj.items directly (some response shapes)
+  if (Array.isArray(obj?.items)) return obj.items;
+
+  return [];
+}
+
 function normalizePlaylist(playlist, fallbackId) {
   const header = playlist?.header || {};
-  const tracks = (playlist?.contents || [])
-    .flatMap((item) => {
-      const track = normalizeTrack(item);
-      return track ? [track] : [];
-    });
+  const rawItems = extractTrackItems(playlist);
+  const tracks = rawItems.flatMap((item) => {
+    const track = normalizeTrack(item);
+    return track ? [track] : [];
+  });
 
   return {
     browseId: fallbackId,
@@ -247,11 +278,11 @@ function normalizePlaylist(playlist, fallbackId) {
 
 function normalizeAlbum(album, fallbackId) {
   const header = album?.header || {};
-  const tracks = (album?.contents || [])
-    .flatMap((item) => {
-      const track = normalizeTrack(item);
-      return track ? [track] : [];
-    });
+  const rawItems = extractTrackItems(album);
+  const tracks = rawItems.flatMap((item) => {
+    const track = normalizeTrack(item);
+    return track ? [track] : [];
+  });
 
   return {
     browseId: fallbackId,
