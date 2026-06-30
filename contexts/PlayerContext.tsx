@@ -601,16 +601,6 @@ async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | 
   const videoId = extractYouTubeVideoId(song);
   if (!videoId) return null;
 
-  const resolvedSong = await resolveJioSaavnAudioForSong(song);
-  if (resolvedSong) {
-    return {
-      ...resolvedSong,
-      youtubeNativeAudio: true,
-      youtubeAudioExpiresAt: Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
-      youtubeVideoId: videoId,
-      source: "youtube",
-    };
-  }
 
   const stream = await resolveWithin(
     getYouTubeMusicAudioStream(videoId),
