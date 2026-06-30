@@ -891,9 +891,11 @@ async function resolvePlaybackUrl(song: Song): Promise<string | null> {
   try {
     const isYt = isYouTubeSource(song);
     if (isYt) {
-      return hasFreshYouTubeNativeAudio(song)
-        ? resolveAudioUrl(song as SongPlaybackSource) || null
-        : null;
+      if (hasFreshYouTubeNativeAudio(song)) {
+        return resolveAudioUrl(song as SongPlaybackSource) || null;
+      }
+      const resolved = await resolveYouTubeTrackForNativePlayback(song);
+      return resolved ? resolveAudioUrl(resolved as SongPlaybackSource) || null : null;
     }
 
     // Static import path — dynamic import can fail silently in some contexts
