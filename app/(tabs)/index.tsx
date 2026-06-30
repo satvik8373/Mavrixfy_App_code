@@ -1871,11 +1871,28 @@ function useHomeScreenInnerView() {
 
   const sections = useMemo<HomeSection[]>(() => {
     const data: HomeSection[] = [];
-    const appendCategorySections = () => {
-      visibleBrowseCategoryRows.forEach((category) => {
-        data.push({ id: `category-${category.id}`, type: "category", data: category });
-      });
+    const appendInterleavedCategorySections = () => {
+      let ytIndex = 0;
+      let jioIndex = 0;
 
+      while (
+        ytIndex < visibleYoutubeHomeCategoryRows.length ||
+        jioIndex < visibleBrowseCategoryRows.length
+      ) {
+        // 1. Append up to 2 YouTube Music rows
+        for (let i = 0; i < 2 && ytIndex < visibleYoutubeHomeCategoryRows.length; i++) {
+          const category = visibleYoutubeHomeCategoryRows[ytIndex++];
+          data.push({ id: `youtube-category-${category.id}`, type: "category", data: category });
+        }
+
+        // 2. Append 1 JioSaavn row
+        if (jioIndex < visibleBrowseCategoryRows.length) {
+          const category = visibleBrowseCategoryRows[jioIndex++];
+          data.push({ id: `category-${category.id}`, type: "category", data: category });
+        }
+      }
+
+      // Handle loading placeholders when no content is loaded yet
       if (visibleBrowseCategoryRows.length === 0 && isLoadingCategories) {
         HOME_DEFAULT_BROWSE_CATEGORY_IDS.slice(0, 2).forEach((priorityId) => {
           data.push({
@@ -1889,12 +1906,6 @@ function useHomeScreenInnerView() {
           });
         });
       }
-    };
-
-    const appendYoutubeHomeCategorySections = () => {
-      visibleYoutubeHomeCategoryRows.forEach((category) => {
-        data.push({ id: `youtube-category-${category.id}`, type: "category", data: category });
-      });
 
       if (visibleYoutubeHomeCategoryRows.length === 0 && isLoadingYoutubeHomeCategories) {
         data.push({
@@ -1916,11 +1927,10 @@ function useHomeScreenInnerView() {
       if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
         data.push({ id: "new-release-songs", type: "new-release-songs" });
       }
-      appendYoutubeHomeCategorySections();
+      appendInterleavedCategorySections();
       recommendationSections.forEach((section) => {
         data.push({ id: `recommendation-${section.id}`, type: "recommendation", data: section });
       });
-      appendCategorySections();
       if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
         data.push({ id: "public-playlists", type: "public-playlists" });
       }
@@ -1951,10 +1961,7 @@ function useHomeScreenInnerView() {
       data.push({ id: "new-release-songs", type: "new-release-songs" });
     }
 
-    appendYoutubeHomeCategorySections();
-
-    // 4. Browse: a small curated set, filtered by mood when selected.
-    appendCategorySections();
+    appendInterleavedCategorySections();
 
     // 5. Made for You and people discovery sit lower to keep the first screen calm.
     if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
@@ -2322,12 +2329,6 @@ function useHomeScreenInnerView() {
           }}
         >
           <View style={[styles.rectCardImageWrap, isYouTube && styles.youtubeRectCardImageWrap]}>
-            {isYouTube ? (
-              <>
-                <View pointerEvents="none" style={styles.youtubeCoverBackPlateOuter} />
-                <View pointerEvents="none" style={styles.youtubeCoverBackPlateInner} />
-              </>
-            ) : null}
             <Image
               source={{ uri: imageUrl || undefined }}
               style={[

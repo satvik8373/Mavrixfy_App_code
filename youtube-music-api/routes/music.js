@@ -397,37 +397,91 @@ async function resolveAudioStream(videoId) {
   const cached = getCachedAudioStream(videoId);
   if (cached) return cached;
 
-  const yt = await getYoutube();
-  const info = await yt.music.getInfo(videoId, process.env.YOUTUBE_PO_TOKEN ? { po_token: process.env.YOUTUBE_PO_TOKEN } : undefined);
-  const formats = [
-    ...(info?.streaming_data?.formats || []),
-    ...(info?.streaming_data?.adaptive_formats || []),
-  ];
-  const format = selectAudioFormat(formats);
-  if (!format) throw httpError(502, "No playable audio formats found for this video");
+  try {
+    const yt = await getYoutube();
+    const info = await yt.music.getInfo(videoId, process.env.YOUTUBE_PO_TOKEN ? { po_token: process.env.YOUTUBE_PO_TOKEN } : undefined);
+    const formats = [
+      ...(info?.streaming_data?.formats || []),
+      ...(info?.streaming_data?.adaptive_formats || []),
+    ];
+    const format = selectAudioFormat(formats);
+    if (!format) throw httpError(502, "No playable audio formats found for this video");
 
-  const url = await format.decipher(yt.session.player);
-  if (!url || !url.startsWith("https://")) {
-    throw httpError(502, "Unable to resolve YouTube audio");
+    const url = await format.decipher(yt.session.player);
+    if (!url || !url.startsWith("https://")) {
+      throw httpError(502, "Unable to resolve YouTube audio");
+    }
+
+    const mimeType = text(format.mime_type).split(";")[0] || "audio/mp4";
+    const stream = {
+      videoId,
+      url,
+      expiresAt: getAudioUrlExpiry(url),
+      headers: {},
+      formatId: String(format.itag || ""),
+      extension: mimeExtension(mimeType),
+      mimeType,
+      audioCodec: audioCodec(text(format.mime_type)),
+      bitrateKbps: Math.round(Number(format.average_bitrate || format.bitrate || 0) / 1000) || null,
+      duration: Math.round(Number(format.approx_duration_ms || info?.basic_info?.duration || 0) / 1000) || info?.basic_info?.duration || null,
+      contentLength: Number(format.content_length) || null,
+    };
+
+    cacheAudioStream(videoId, stream);
+    return stream;
+  } catch (error) {
+    console.warn(`[youtubei.js] resolveAudioStream failed for ${videoId}: ${error.message || error}. Attempting public Piped API fallback...`);
+
+    const pipedInstances = [
+      "https://pipedapi.kavin.rocks",
+      "https://pipedapi.leptons.xyz",
+      "https://api.piped.yt",
+      "https://pipedapi.adminforge.de",
+      "https://piped-api.privacy.com.de",
+    ];
+
+    for (const base of pipedInstances) {
+      try {
+        const response = await fetch(`${base}/streams/${videoId}`, {
+          signal: AbortSignal.timeout(2500),
+        });
+        if (!response.ok) continue;
+        const data = await response.json();
+
+        const audioStreams = data?.audioStreams || [];
+        if (audioStreams.length === 0) continue;
+
+        // Sort by bitrate (highest first)
+        audioStreams.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+        const bestAudio = audioStreams[0];
+
+        if (bestAudio?.url) {
+          const mimeType = bestAudio.mimeType ? bestAudio.mimeType.split(";")[0] : "audio/webm";
+          const stream = {
+            videoId,
+            url: bestAudio.url,
+            expiresAt: Math.floor(Date.now() / 1000) + 120 * 60, // 2 hours expiry
+            headers: {},
+            formatId: "piped",
+            extension: bestAudio.format?.toLowerCase() || "webm",
+            mimeType,
+            audioCodec: bestAudio.codec || "opus",
+            bitrateKbps: Math.round((bestAudio.bitrate || 128000) / 1000),
+            duration: Number(data.duration) || null,
+            contentLength: null,
+          };
+
+          cacheAudioStream(videoId, stream);
+          console.log(`[Piped Fallback] Successfully resolved ${videoId} using instance: ${base}`);
+          return stream;
+        }
+      } catch (err) {
+        console.warn(`[Piped Fallback] Instance ${base} failed for ${videoId}: ${err.message || err}`);
+      }
+    }
+
+    throw error;
   }
-
-  const mimeType = text(format.mime_type).split(";")[0] || "audio/mp4";
-  const stream = {
-    videoId,
-    url,
-    expiresAt: getAudioUrlExpiry(url),
-    headers: {},
-    formatId: String(format.itag || ""),
-    extension: mimeExtension(mimeType),
-    mimeType,
-    audioCodec: audioCodec(text(format.mime_type)),
-    bitrateKbps: Math.round(Number(format.average_bitrate || format.bitrate || 0) / 1000) || null,
-    duration: Math.round(Number(format.approx_duration_ms || info?.basic_info?.duration || 0) / 1000) || info?.basic_info?.duration || null,
-    contentLength: Number(format.content_length) || null,
-  };
-
-  cacheAudioStream(videoId, stream);
-  return stream;
 }
 
 async function resolveAudioStreamForRequest(req) {

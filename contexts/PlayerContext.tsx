@@ -2562,13 +2562,21 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       const cq = queueRef.current;
       if (cq.length === 0) return;
 
-      const trackId = event?.track?.id;
-      if (trackId != null) {
-        const normalizedId = String(trackId);
-        const mappedIndex = cq.findIndex((song) => song.id === normalizedId);
-        if (mappedIndex >= 0) {
-          applyNativeTrackIndex(mappedIndex, normalizedId);
-          return;
+      // In PlaybackTrackChanged (legacy/compat event):
+      // - event.nextTrack is the index of the new track.
+      // - event.track is the index or object of the PREVIOUS track.
+      // Therefore, if nextTrack is defined, we should ignore event.track to avoid reverting to the old track.
+      const isLegacyTrackChanged = event && ("nextTrack" in event || "position" in event);
+
+      if (!isLegacyTrackChanged) {
+        const trackId = event?.track?.id;
+        if (trackId != null) {
+          const normalizedId = String(trackId);
+          const mappedIndex = cq.findIndex((song) => song.id === normalizedId);
+          if (mappedIndex >= 0) {
+            applyNativeTrackIndex(mappedIndex, normalizedId);
+            return;
+          }
         }
       }
 
