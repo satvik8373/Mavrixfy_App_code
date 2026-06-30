@@ -1587,27 +1587,9 @@ function useLegacyPlayerScreenView() {
 
   const [backgroundVideoId, setBackgroundVideoId] = useState<string | null>(null);
 
-  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song after the resolver verifies an official visual match.
   useEffect(() => {
-    if (!screenSong || isLowEnd) {
-      setBackgroundVideoId(null);
-      return;
-    }
-
     setBackgroundVideoId(null);
-
-    let cancelled = false;
-    void getYouTubeMusicVisualVideoId(screenSong)
-      .then((visualVideoId) => {
-        if (cancelled) return;
-        setBackgroundVideoId(visualVideoId || null);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [screenSong, isLowEnd]);
+  }, [screenSong]);
 
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
   const [prevSongId, setPrevSongId] = useState(screenSong?.id);
