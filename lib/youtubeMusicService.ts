@@ -771,16 +771,27 @@ function getSearchSuggestionItems(json: any): string[] {
 }
 
 function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAudioStream | null {
-  const source = getResponsePayload(json, "stream", "audio");
+  // Backend returns { success: true, data: { url, expiresAt, headers, ... } }
+  // Unwrap the envelope: check json.data first, then fallback to root json for
+  // legacy compatibility with older backend shapes.
+  const source: any =
+    (json?.data && typeof json.data === "object" && json.data.url)
+      ? json.data
+      : (json?.stream && typeof json.stream === "object") // legacy
+        ? json.stream
+        : json;
+
   const url = readString(source?.url);
-  if (!url.startsWith("https://")) return null;
+  // Accept both https:// URLs (direct YouTube) and http:// for local dev proxies
+  if (!url || (!url.startsWith("https://") && !url.startsWith("http://"))) return null;
 
   const rawExpiry = Number(source?.expiresAt);
   const expiresAt = Number.isFinite(rawExpiry) && rawExpiry > 0
     ? rawExpiry < 1_000_000_000_000
-      ? rawExpiry * 1000
-      : rawExpiry
-    : Date.now() + 10 * 60 * 1000;
+      ? rawExpiry * 1000  // seconds → ms
+      : rawExpiry         // already ms
+    : Date.now() + 6 * 60 * 60 * 1000; // default 6-hour TTL
+
   const headers: Record<string, string> = {};
   if (source?.headers && typeof source.headers === "object") {
     for (const [key, value] of Object.entries(source.headers)) {
@@ -1017,13 +1028,24 @@ export async function getYouTubeMusicAudioStream(
   const request = (async () => {
     try {
       const encodedVideoId = encodeURIComponent(cleanVideoId);
+
+      // ── Stream resolution via youtubei.js (Node.js backend) ──────────────
+      // The backend route /stream/:videoId uses youtubei.js internally.
+      // ytmusicapi is NOT used for streams — it is metadata-only.
       const json = await fetchFirstJson<any>(
-        [
-          ...getEndpointCandidates(`/audio/${encodedVideoId}`, `/audio/${encodedVideoId}`),
-          ...getEndpointCandidates(`/stream-info/${encodedVideoId}`, `/stream-info/${encodedVideoId}`),
-        ],
+        getEndpointCandidates(`/stream/${encodedVideoId}`, `/stream/${encodedVideoId}`),
         signal
       );
+
+      // Guard: if the backend returned { success: false }, treat as failure
+      if (json?.success === false) {
+        logger.warn("[YouTube Music] Stream resolver returned failure", {
+          videoId: cleanVideoId,
+          message: json?.message,
+        });
+        return null;
+      }
+
       const stream = normalizeAudioStreamPayload(json, cleanVideoId);
       if (!stream) {
         logger.warn("[YouTube Music] Audio resolver returned no direct stream URL", { videoId: cleanVideoId });

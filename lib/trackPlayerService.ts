@@ -42,7 +42,9 @@ export const trackPlayerService = async () => {
   // ── Play / Pause / Stop ────────────────────────────────────────────────────
   TrackPlayer.addEventListener(Event.RemotePlay, () => runRemoteCommand(() => TrackPlayer.play()));
   TrackPlayer.addEventListener(Event.RemotePause, () => runRemoteCommand(() => TrackPlayer.pause()));
-  TrackPlayer.addEventListener(Event.RemoteStop, () => runRemoteCommand(() => TrackPlayer.pause()));
+  // Use stop() (not pause()) so the foreground service and notification are
+  // torn down when the user explicitly hits the Stop button.
+  TrackPlayer.addEventListener(Event.RemoteStop, () => runRemoteCommand(() => TrackPlayer.stop()));
 
   // ── Next / Previous ────────────────────────────────────────────────────────
   TrackPlayer.addEventListener(Event.RemoteNext, () => runRemoteCommand(async () => {

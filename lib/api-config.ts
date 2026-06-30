@@ -39,8 +39,14 @@ function getYouTubeMusicBaseUrl(): string {
     return normalizeBaseUrl(fallbackUrl);
   }
 
-  if (envUrl) return normalizeBaseUrl(envUrl);
-  if (extraUrl) return normalizeBaseUrl(extraUrl);
+  if (envUrl) {
+    logger.info(`[YouTube Music Config] Using env URL: ${envUrl}`);
+    return normalizeBaseUrl(envUrl);
+  }
+  if (extraUrl) {
+    logger.info(`[YouTube Music Config] Using extra URL: ${extraUrl}`);
+    return normalizeBaseUrl(extraUrl);
+  }
 
   logger.warn(
     "[YouTube Music Config] Using production YouTube Music proxy. Set EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL for a different backend."

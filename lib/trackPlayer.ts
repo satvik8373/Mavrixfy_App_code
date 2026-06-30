@@ -43,9 +43,11 @@ async function configurePlayerOptions(): Promise<void> {
       TrackPlayer.updateOptions({
         // ── Android notification ──────────────────────────────────────────
         android: {
-          // Keep the service alive when the app is swiped away so background
-          // playback continues (required for Android Auto).
-          appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
+          // Stop playback and dismiss the notification when the app is swiped
+          // away from the recents screen. Use ContinuePlayback only if you
+          // specifically need Android Auto background behaviour.
+          appKilledPlaybackBehavior:
+            AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
           // Pause on phone calls, navigation audio, etc.
           alwaysPauseOnInterruption: true,
           // Give 5 s grace before the foreground service stops after pause.
