@@ -1589,7 +1589,7 @@ function useLegacyPlayerScreenView() {
 
   // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song after the resolver verifies an official visual match.
   useEffect(() => {
-    if (!screenSong) {
+    if (!screenSong || isLowEnd) {
       setBackgroundVideoId(null);
       return;
     }
@@ -1607,7 +1607,7 @@ function useLegacyPlayerScreenView() {
     return () => {
       cancelled = true;
     };
-  }, [screenSong]);
+  }, [screenSong, isLowEnd]);
 
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
   const [prevSongId, setPrevSongId] = useState(screenSong?.id);

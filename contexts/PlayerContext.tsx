@@ -22,6 +22,8 @@ import {
 } from "@/lib/playbackEngine";
 import type { PlaybackCommandType } from "@/lib/playbackEngine";
 import { mapFilter } from "@/lib/arrayUtils";
+import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
+
 
 let TrackPlayer: any = null;
 let Event: any = null;
@@ -1077,6 +1079,21 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     return () => clearYoutubeAutoPlayTimer();
   }, [clearYoutubeAutoPlayTimer]);
 
+  const [isLowEndDevice, setIsLowEndDevice] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    void getDevicePerformanceProfile().then((profile) => {
+      if (mounted) {
+        setIsLowEndDevice(profile.isLowEndDevice);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+
   // Get auth context properly
   const { user: authUser } = useAuth();
 
@@ -1938,6 +1955,15 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, [measureYoutubeOverlayRoot, pathname, screenHeight, screenWidth]);
 
   const playYouTubeSong = useCallback(async (song: Song, newQueue?: Song[], newIndex?: number) => {
+    if (isLowEndDevice) {
+      logger.warn("[YouTube] Low-end device: Disabling YouTube video player fallback.");
+      showPlaybackNotice("YouTube video playback is disabled on this device.");
+      setPlaybackIntent(null);
+      setPlaybackLoading(false);
+      updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
+      return;
+    }
+
     const playableQueue = (newQueue || [song])
       .filter((item): item is Song => Boolean(item?.id))
       .map(stripTransientYouTubeAudioUrl);
@@ -2014,7 +2040,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       type: "song",
       data: targetSong,
     });
-  }, [clearUserQueuedSongIds, showPlaybackNotice]);
+  }, [clearUserQueuedSongIds, isLowEndDevice, showPlaybackNotice]);
 
   const clearSleepTimer = useCallback(() => {
     if (sleepTimerTimeoutRef.current) {
