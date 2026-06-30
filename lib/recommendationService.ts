@@ -66,72 +66,45 @@ const LOCAL_SECTION_QUERIES: Array<{
   source: RecommendationSource;
   queries: string[];
 }> = [
-  {
-    id: "recommendedForYou",
-    title: "Recommended For You",
-    subtitle: "Popular Hindi and Bollywood picks with fresh momentum",
-    source: "jiosaavn",
-    queries: [
-      `popular hindi songs ${CURRENT_YEAR} playlist`,
-      `top bollywood songs ${CURRENT_YEAR} playlist`,
-      "hindi bollywood hits playlist",
-      "trending hindi songs playlist",
-      "bollywood most played playlist",
-    ],
-  },
-  {
-    id: "freshDiscoveries",
-    title: "Fresh Discoveries",
-    subtitle: "New Hindi and Bollywood playlists with strong audience signals",
-    source: "fresh",
-    queries: [
-      `new hindi songs ${CURRENT_YEAR} playlist`,
-      `latest bollywood songs ${CURRENT_YEAR} playlist`,
-      `new bollywood movie songs ${CURRENT_YEAR}`,
-      "latest hindi movie songs playlist",
-      "fresh hindi hits playlist",
-    ],
-  },
-  {
-    id: "popularNearYou",
-    title: "Popular Near You",
-    subtitle: "Popular Hindi, Bollywood, and viral India playlists",
-    source: "regional",
-    queries: [
-      "popular hindi playlist",
-      "bollywood most played playlist",
-      "hindi reels trending playlist",
-      "viral bollywood songs playlist",
-      "india top hindi playlist",
-    ],
-  },
-  {
-    id: "basedOnActivity",
-    title: "Based On Your Activity",
-    subtitle: "High-scoring Hindi and Bollywood moods",
-    source: "trending",
-    queries: [
-      "hindi romantic hits playlist",
-      "bollywood party hits playlist",
-      "arijit singh hindi hits playlist",
-      "hindi workout hits playlist",
-      "bollywood dance hits playlist",
-    ],
-  },
-  {
-    id: "newReleases",
-    title: "New Releases",
-    subtitle: "Latest Hindi and Bollywood drops",
-    source: "fresh",
-    queries: [
-      `latest hindi songs ${CURRENT_YEAR} playlist`,
-      `new bollywood songs ${CURRENT_YEAR} playlist`,
-      `latest bollywood movie songs ${CURRENT_YEAR}`,
-      "new hindi movie songs playlist",
-      "latest hindi hits playlist",
-    ],
-  },
-];
+    {
+      id: "popularNearYou",
+      title: "Popular Near You",
+      subtitle: "Popular Hindi, Bollywood, and viral India playlists",
+      source: "regional",
+      queries: [
+        "popular hindi playlist",
+        "bollywood most played playlist",
+        "hindi reels trending playlist",
+        "viral bollywood songs playlist",
+        "india top hindi playlist",
+      ],
+    },
+    {
+      id: "basedOnActivity",
+      title: "Based On Your Activity",
+      subtitle: "High-scoring Hindi and Bollywood moods",
+      source: "trending",
+      queries: [
+        "hindi romantic hits playlist",
+        "bollywood party hits playlist",
+        "hindi workout hits playlist",
+        "bollywood dance hits playlist",
+      ],
+    },
+    {
+      id: "newReleases",
+      title: "New Releases",
+      subtitle: "Latest Hindi and Bollywood drops",
+      source: "fresh",
+      queries: [
+        `latest hindi songs ${CURRENT_YEAR} playlist`,
+        `new bollywood songs ${CURRENT_YEAR} playlist`,
+        `latest bollywood movie songs ${CURRENT_YEAR}`,
+        "new hindi movie songs playlist",
+        "latest hindi hits playlist",
+      ],
+    },
+  ];
 
 const LOCAL_BACKUP_QUERIES = [
   `popular hindi songs ${CURRENT_YEAR} playlist`,
@@ -466,6 +439,9 @@ export async function getRecommendationHomeFeed(options?: RecommendationHomeFeed
   return {
     ...feed,
     sections: feed.sections.reduce<RecommendationSection[]>((sections, section) => {
+      if (section.id === "recommendedForYou" || section.id === "freshDiscoveries") {
+        return sections;
+      }
       const items = Array.isArray(section.items)
         ? section.items.filter((item) => item?.kind === "playlist")
         : [];

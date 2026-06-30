@@ -1,8 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { JioSaavnImage, Song } from "@/lib/musicData";
-import { getYouTubeMusicApiUrl } from "@/lib/api-config";
-import { PRODUCTION_YOUTUBE_MUSIC_API_URL } from "@/lib/youtube-music-config";
+import { getYouTubeMusicApiUrl, PRODUCTION_YOUTUBE_MUSIC_API_URL } from "@/lib/api-config";
 import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";
 import { logger } from "@/lib/logger";
 
@@ -84,10 +83,9 @@ const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const REQUEST_TIMEOUT_MS = 30000;
-const PRIVATE_DEVELOPMENT_REQUEST_TIMEOUT_MS = 1800;
+const PRIVATE_DEVELOPMENT_REQUEST_TIMEOUT_MS = 15000;
+const OPTIONAL_HOME_SECTION_TIMEOUT_MS = 4500;
 const CURRENT_YEAR = new Date().getFullYear();
-// Home category filtering removed — keep simple playlist results.
-const PREVIOUS_YEAR = CURRENT_YEAR - 1;
 const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v1";
 const YOUTUBE_VIDEO_SEARCH_CACHE_VERSION = "v2";
 const AUDIO_STREAM_EXPIRY_MARGIN_MS = 60 * 1000;
@@ -152,7 +150,12 @@ function normalizeYouTubeThumbnails(thumbnails?: Array<{ url: string; width: num
 }
 
 function getBestThumbnailUrl(thumbnails?: Array<{ url: string; width: number; height: number }>): string {
-  if (!thumbnails || thumbnails.length === 0) return "";
+  const best = getBestThumbnail(thumbnails);
+  return best ? upscaleYouTubeThumbnail(best.url) : "";
+}
+
+function getBestThumbnail(thumbnails?: Array<{ url: string; width: number; height: number }>): { url: string; width: number; height: number } | null {
+  if (!thumbnails || thumbnails.length === 0) return null;
 
   // Sort by resolution (largest first)
   const sorted = sortedCopy(thumbnails, (a, b) => {
@@ -161,7 +164,7 @@ function getBestThumbnailUrl(thumbnails?: Array<{ url: string; width: number; he
     return bRes - aRes;
   });
 
-  return upscaleYouTubeThumbnail(sorted[0]?.url || "");
+  return sorted[0] || null;
 }
 
 function readString(value: unknown): string {
@@ -618,6 +621,22 @@ function isAbortLikeError(error: unknown): boolean {
   return name === "AbortError" || message === "Aborted" || message === "Request aborted";
 }
 
+function resolveWithTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
+
 async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T | null> {
   const timeout = createTimeoutSignal(
     isPrivateDevelopmentApiUrl(url) ? PRIVATE_DEVELOPMENT_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
@@ -658,10 +677,6 @@ async function fetchFirstJson<T>(urls: string[], signal?: AbortSignal): Promise<
   return null;
 }
 
-async function fetchFirstJsonSequential<T>(urls: string[], signal?: AbortSignal): Promise<T | null> {
-  return fetchFirstJson<T>(urls, signal);
-}
-
 function isPrivateDevelopmentApiUrl(value: string): boolean {
   try {
     const host = new URL(value).hostname.toLowerCase();
@@ -685,34 +700,42 @@ function getEndpointCandidates(
   query: string | string[] = ""
 ): string[] {
   const appBase = getYouTubeMusicApiUrl().replace(/\/+$/, "");
-  const productionBase = PRODUCTION_YOUTUBE_MUSIC_API_URL.replace(/\/+$/, "");
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const primaryPathCandidates = isPrivateDevelopmentApiUrl(appBase)
-    ? [`${appBase}${normalizedPath}`]
-    : appBase.includes("/api/youtube-music")
-      ? [`${appBase}${normalizedPath}`, `${appBase}/api${normalizedPath}`]
-      : [
-        `${appBase}${normalizedPath}`,
-        `${appBase}/api/youtube-music${normalizedPath}`,
-        `${appBase}/api${normalizedPath}`,
-      ];
-  const productionPathCandidates = productionBase.includes("/api/youtube-music")
-    ? [`${productionBase}${normalizedPath}`, `${productionBase}/api${normalizedPath}`]
-    : [
-      `${productionBase}${normalizedPath}`,
-      `${productionBase}/api/youtube-music${normalizedPath}`,
-      `${productionBase}/api${normalizedPath}`,
-    ];
-  const pathCandidates = isPrivateDevelopmentApiUrl(appBase)
-    ? [...primaryPathCandidates, ...productionPathCandidates]
-    : primaryPathCandidates;
+
+  // Build primary path candidates based on the configured URL
+  let primaryPathCandidates: string[];
+  if (isPrivateDevelopmentApiUrl(appBase)) {
+    // Respect the user's rule: "dont fetch production url use local"
+    primaryPathCandidates = [`${appBase}${normalizedPath}`];
+  } else {
+    const productionBase = PRODUCTION_YOUTUBE_MUSIC_API_URL.replace(/\/+$/, "");
+    if (appBase === productionBase) {
+      // Using production URL directly — no need to duplicate
+      primaryPathCandidates = appBase.includes("/api/youtube-music")
+        ? [`${appBase}${normalizedPath}`]
+        : [
+            `${appBase}${normalizedPath}`,
+            `${appBase}/api/youtube-music${normalizedPath}`,
+            `${appBase}/api${normalizedPath}`,
+          ];
+    } else {
+      primaryPathCandidates = appBase.includes("/api/youtube-music")
+        ? [`${appBase}${normalizedPath}`, `${appBase}/api${normalizedPath}`]
+        : [
+            `${appBase}${normalizedPath}`,
+            `${appBase}/api/youtube-music${normalizedPath}`,
+            `${appBase}/api${normalizedPath}`,
+          ];
+    }
+  }
+
   const queryCandidates = Array.isArray(query) ? query : [query];
   const seen = new Set<string>();
   const candidates: string[] = [];
 
   for (const queryCandidate of queryCandidates) {
     const suffix = queryCandidate ? `?${queryCandidate}` : "";
-    for (const pathCandidate of pathCandidates) {
+    for (const pathCandidate of primaryPathCandidates) {
       const candidate = `${pathCandidate}${suffix}`;
       if (seen.has(candidate)) continue;
       seen.add(candidate);
@@ -1254,6 +1277,8 @@ export interface YouTubeMusicPlaylistCard {
   id: string;
   name: string;
   imageUrl: string;
+  imageWidth?: number;
+  imageHeight?: number;
   songCount?: number;
   author?: string;
   category?: string;
@@ -1269,7 +1294,7 @@ export interface YouTubeMusicHomeCategoryData {
   results: YouTubeMusicPlaylistCard[];
 }
 
-const HOME_YOUTUBE_MUSIC_CATEGORY_VERSION = "v4";
+const HOME_YOUTUBE_MUSIC_CATEGORY_VERSION = "v10";
 
 function dedupeYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[]): YouTubeMusicPlaylistCard[] {
   const seen = new Set<string>();
@@ -1304,18 +1329,63 @@ function normalizeYouTubePlaylistCard(raw: any, fallbackKind?: YouTubeMusicPlayl
   if (!id || !name) return null;
 
   const thumbnails = normalizeThumbnails(raw?.thumbnails || raw?.thumbnail || raw?.image);
-  const imageUrl = getBestThumbnailUrl(thumbnails);
+  const bestThumbnail = getBestThumbnail(thumbnails);
+  const imageUrl = bestThumbnail ? upscaleYouTubeThumbnail(bestThumbnail.url) : "";
 
   return {
     id,
     name,
     imageUrl,
+    imageWidth: bestThumbnail?.width || undefined,
+    imageHeight: bestThumbnail?.height || undefined,
     songCount: Number(raw?.trackCount || raw?.itemCount || raw?.count) || undefined,
     author: readString(raw?.author || raw?.owner || raw?.channel?.name) || undefined,
     category: readString(raw?.category) || undefined,
     description: readString(raw?.description) || undefined,
     kind: normalizeYouTubePlaylistKind(raw, fallbackKind),
   };
+}
+
+function toYouTubeHomeSection(
+  id: string,
+  title: string,
+  playlists: YouTubeMusicPlaylistCard[],
+  limit: number
+): YouTubeMusicHomeCategoryData | null {
+  const results = dedupeYouTubePlaylistCards(playlists)
+    .filter((playlist) => playlist.id && playlist.name)
+    .slice(0, limit)
+    .map((playlist) => ({
+      ...playlist,
+      author: playlist.author || "YouTube Music",
+      category: playlist.category || title,
+    }));
+
+  return results.length > 0 ? { id, title, results } : null;
+}
+
+function dedupeYouTubeHomeSections(sections: YouTubeMusicHomeCategoryData[]): YouTubeMusicHomeCategoryData[] {
+  const seenSectionIds = new Set<string>();
+  const seenPlaylistIds = new Set<string>();
+  const unique: YouTubeMusicHomeCategoryData[] = [];
+
+  for (const section of sections) {
+    if (seenSectionIds.has(section.id)) continue;
+    seenSectionIds.add(section.id);
+
+    const results = section.results.filter((playlist) => {
+      const id = readString(playlist.id);
+      if (!id || seenPlaylistIds.has(id)) return false;
+      seenPlaylistIds.add(id);
+      return true;
+    });
+
+    if (results.length > 0) {
+      unique.push({ ...section, results });
+    }
+  }
+
+  return unique;
 }
 
 async function searchYouTubeMusicPlaylistCards(
@@ -1364,6 +1434,7 @@ function getHomeShelfItems(json: any): any[] {
   const payload = getResponsePayload(json, "home", "shelves", "results");
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(json?.home)) return json.home;
+  if (Array.isArray(json?.data?.home?.sections)) return json.data.home.sections;
   if (Array.isArray(json?.data?.home)) return json.data.home;
   if (Array.isArray(json?.data?.results)) return json.data.results;
   return [];
@@ -1383,13 +1454,16 @@ function normalizeHomeShelfPlaylistCard(item: any): YouTubeMusicPlaylistCard | n
   if (!id || !name || !isPlaylist) return null;
 
   const thumbnails = normalizeThumbnails(item?.thumbnails || item?.thumbnail || item?.image);
+  const bestThumbnail = getBestThumbnail(thumbnails);
   const description = readString(item?.description);
   const author = readString(item?.author || item?.owner || item?.channel?.name) || description.split("•")[0]?.trim();
 
   return {
     id,
     name,
-    imageUrl: getBestThumbnailUrl(thumbnails),
+    imageUrl: bestThumbnail ? upscaleYouTubeThumbnail(bestThumbnail.url) : "",
+    imageWidth: bestThumbnail?.width || undefined,
+    imageHeight: bestThumbnail?.height || undefined,
     songCount: Number(item?.trackCount || item?.itemCount || item?.count) || undefined,
     author: author || "YouTube Music",
     category: "YouTube Home",
@@ -1398,79 +1472,210 @@ function normalizeHomeShelfPlaylistCard(item: any): YouTubeMusicPlaylistCard | n
   };
 }
 
-async function getYouTubeMusicHomePlaylistCards(limit: number): Promise<YouTubeMusicPlaylistCard[]> {
-  const safeLimit = Math.max(1, Math.min(limit, 10));
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:home_shelves:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${safeLimit}`;
-  const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
-  if (cached) return cached;
+function getHomeShelfContents(shelf: any): any[] {
+  if (Array.isArray(shelf?.contents)) return shelf.contents;
+  if (Array.isArray(shelf?.items)) return shelf.items;
+  return [];
+}
+
+function homeShelfTitleToId(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/&amp;/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "yt-playlists";
+}
+
+function getMoodCategoryItems(json: any): Array<{ title: string; params: string }> {
+  const source = json?.data || json?.moods || json?.categories || json;
+  const rawItems = Array.isArray(source)
+    ? source
+    : source && typeof source === "object"
+      ? Object.values(source).flatMap((value) => (Array.isArray(value) ? value : []))
+      : [];
+
+  return mapFilter(
+    rawItems,
+    (item: any) => ({
+      title: readString(item?.title || item?.name),
+      params: readString(item?.params || item?.browseParams || item?.id),
+    }),
+    (item): item is { title: string; params: string } => Boolean(item.title && item.params)
+  );
+}
+
+async function getYouTubeMusicMoodCategorySections(
+  limitPerCategory: number,
+  maxCategories: number = 4
+): Promise<YouTubeMusicHomeCategoryData[]> {
+  const safeItemLimit = Math.max(1, Math.min(limitPerCategory, 12));
+  const safeCategoryLimit = Math.max(1, Math.min(maxCategories, 8));
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:mood_category_sections:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${safeItemLimit}:${safeCategoryLimit}`;
+  if (!__DEV__) {
+    const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, CACHE_TTL_MS);
+    if (cached) return cached;
+  }
+
+  try {
+    const moodsJson = await fetchFirstJson<any>(getEndpointCandidates("/moods", "/moods"));
+    const moodItems = getMoodCategoryItems(moodsJson).slice(0, safeCategoryLimit);
+    const sections = await Promise.all(
+      moodItems.map(async (mood) => {
+        try {
+          const json = await fetchFirstJson<any>(
+            getEndpointCandidates(
+              "/mood-playlists",
+              "/mood-playlists",
+              `params=${encodeURIComponent(mood.params)}`
+            )
+          );
+          const playlists = dedupeYouTubePlaylistCards(
+            mapFilter(
+              getSearchResultItems(json),
+              (item: any) => normalizeHomeShelfPlaylistCard(item) ?? normalizeYouTubePlaylistCard(item, "featured"),
+              (playlist): playlist is YouTubeMusicPlaylistCard => Boolean(playlist)
+            )
+          );
+          return toYouTubeHomeSection(`yt-mood-${homeShelfTitleToId(mood.title)}`, mood.title, playlists, safeItemLimit);
+        } catch (err) {
+          logger.debug("[YouTube Music] Mood playlist fetch skipped:", mood.title, err);
+          return null;
+        }
+      })
+    );
+
+    const finalSections = mapFilter(
+      sections,
+      (section) => section,
+      (section): section is YouTubeMusicHomeCategoryData => Boolean(section)
+    );
+    if (!__DEV__ && finalSections.length > 0) {
+      await setCache(cacheKey, finalSections);
+    }
+    return finalSections;
+  } catch (error) {
+    if (isAbortLikeError(error)) {
+      logger.debug("[YouTube Music] Mood sections fetch aborted");
+      return [];
+    }
+    logger.warn("[YouTube Music] Mood sections fetch failed:", error);
+    return [];
+  }
+}
+
+async function getYouTubeMusicHomeCategorySections(
+  limitPerCategory: number,
+  maxShelves: number = 10
+): Promise<YouTubeMusicHomeCategoryData[]> {
+  const safeShelfLimit = Math.max(1, Math.min(maxShelves, 12));
+  const safeItemLimit = Math.max(1, Math.min(limitPerCategory, 12));
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:home_shelf_sections:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${safeItemLimit}:${safeShelfLimit}`;
+  if (!__DEV__) {
+    const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, CACHE_TTL_MS);
+    if (cached) return cached;
+  }
 
   try {
     const json = await fetchFirstJson<any>(
-      getEndpointCandidates("/home", "/home", `limit=${safeLimit}`)
+      getEndpointCandidates("/home", "/home", [`limit=${safeShelfLimit}`])
     );
     if (!json) return [];
 
-    const cards = dedupeYouTubePlaylistCards(getHomeShelfItems(json).flatMap((shelf: any) => {
-      const contents = Array.isArray(shelf?.contents)
-        ? shelf.contents
-        : Array.isArray(shelf?.items)
-          ? shelf.items
-          : [];
+    const shelves = getHomeShelfItems(json);
+    const usedIds = new Set<string>();
+    const sections: YouTubeMusicHomeCategoryData[] = [];
 
-      return mapFilter(
-        contents,
-        (item: any) => normalizeHomeShelfPlaylistCard(item),
-        (playlist): playlist is YouTubeMusicPlaylistCard => Boolean(playlist)
-      );
-    }));
+    for (const shelf of shelves) {
+      const title = readString(shelf?.title || shelf?.name) || "YouTube Music";
 
-    if (cards.length > 0) {
-      await setCache(cacheKey, cards);
+      const playlists = dedupeYouTubePlaylistCards(
+        mapFilter(
+          getHomeShelfContents(shelf),
+          (item: any) => normalizeHomeShelfPlaylistCard(item) ?? normalizeYouTubePlaylistCard(item, "featured"),
+          (playlist): playlist is YouTubeMusicPlaylistCard => Boolean(playlist)
+        )
+      ).slice(0, safeItemLimit);
+
+      if (playlists.length === 0) continue;
+
+      let id = `yt-${homeShelfTitleToId(title)}`;
+      if (usedIds.has(id)) {
+        let suffix = 2;
+        while (usedIds.has(`${id}-${suffix}`)) suffix += 1;
+        id = `${id}-${suffix}`;
+      }
+      usedIds.add(id);
+
+      sections.push({
+        id,
+        title,
+        results: playlists.map((playlist) => ({
+          ...playlist,
+          category: title,
+        })),
+      });
     }
-    return cards;
+
+    if (!__DEV__ && sections.length > 0) {
+      await setCache(cacheKey, sections);
+    }
+    return sections;
   } catch (error) {
     if (isAbortLikeError(error)) {
-      logger.debug("[YouTube Music] Home shelves fetch aborted");
+      logger.debug("[YouTube Music] Home shelf sections fetch aborted");
       return [];
     }
-    logger.warn("[YouTube Music] Home shelves fetch failed:", error);
+    logger.warn("[YouTube Music] Home shelf sections fetch failed:", error);
     return [];
   }
 }
 
 
-function selectRelevantYouTubeTrendingPlaylists(playlists: YouTubeMusicPlaylistCard[]): YouTubeMusicPlaylistCard[] {
-  return dedupeYouTubePlaylistCards(playlists);
-}
-
 export async function getHomeYouTubeMusicCategories(options?: {
   limitPerCategory?: number;
-  categoryIds?: string[];
 }): Promise<YouTubeMusicHomeCategoryData[]> {
   const limit = Math.min(options?.limitPerCategory ?? 8, 12);
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:home_categories:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${limit}:direct`;
-  const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, 60 * 60 * 1000);
-  if (cached) return cached;
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:home_categories:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${limit}:raw`;
+  if (!__DEV__) {
+    const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, 60 * 60 * 1000);
+    if (cached) return cached;
+  }
 
-  const [trendingPlaylists, homePlaylists] = await Promise.all([
+  const [shelfSections, trendingPlaylists, moodSections] = await Promise.all([
+    getYouTubeMusicHomeCategorySections(limit, 10),
     getYouTubeMusicTrendingPlaylists("IN").catch(() => [] as YouTubeMusicPlaylistCard[]),
-    getYouTubeMusicHomePlaylistCards(Math.max(limit, 10)).catch(() => [] as YouTubeMusicPlaylistCard[]),
+    resolveWithTimeout(
+      getYouTubeMusicMoodCategorySections(limit, 2),
+      OPTIONAL_HOME_SECTION_TIMEOUT_MS,
+      [] as YouTubeMusicHomeCategoryData[]
+    ),
   ]);
 
-  const directPlaylists = dedupeYouTubePlaylistCards([...trendingPlaylists, ...homePlaylists]).slice(0, limit);
-  const finalResults: YouTubeMusicHomeCategoryData[] = directPlaylists.length > 0
-    ? [{ id: "playlists", title: "Playlists", results: directPlaylists }]
-    : [];
+  const chartSection = toYouTubeHomeSection("yt-charts", "YouTube Music Charts", trendingPlaylists, limit);
+  const fallbackSection = shelfSections.length === 0 && trendingPlaylists.length === 0 && moodSections.length === 0
+    ? toYouTubeHomeSection(
+        "yt-search-suggestions",
+        "YouTube Music Suggestions",
+        await searchYouTubeMusicPlaylistCards("music", limit).catch(() => [] as YouTubeMusicPlaylistCard[]),
+        limit
+      )
+    : null;
 
-  if (finalResults.length > 0) void setCache(cacheKey, finalResults);
+  const finalResults = dedupeYouTubeHomeSections(mapFilter(
+    [...shelfSections, chartSection, ...moodSections, fallbackSection],
+    (section) => section,
+    (section): section is YouTubeMusicHomeCategoryData => Boolean(section)
+  ));
+  if (!__DEV__ && finalResults.length > 0) void setCache(cacheKey, finalResults);
   return finalResults;
 }
 
 export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise<YouTubeMusicPlaylistCard[]> {
   const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:trending_playlists:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${country}`;
-    const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
+  const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
   if (cached) {
-    return selectRelevantYouTubeTrendingPlaylists(cached.map((playlist) => ({
+    return dedupeYouTubePlaylistCards(cached.map((playlist) => ({
       ...playlist,
       author: playlist.author || "YouTube Music",
       category: playlist.category || "Charts",
@@ -1494,15 +1699,15 @@ export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): 
         if (!id || !name) return null;
 
         // Get best quality thumbnail
-        const thumbnails = item.thumbnails || [];
-        const bestImage = thumbnails.length > 0
-          ? thumbnails[thumbnails.length - 1].url
-          : "";
+        const thumbnails = normalizeThumbnails(item.thumbnails || item.thumbnail || item.image);
+        const bestThumbnail = getBestThumbnail(thumbnails);
 
         const result: YouTubeMusicPlaylistCard = {
           id,
           name,
-          imageUrl: upscaleYouTubeThumbnail(bestImage),
+          imageUrl: bestThumbnail ? upscaleYouTubeThumbnail(bestThumbnail.url) : "",
+          imageWidth: bestThumbnail?.width || undefined,
+          imageHeight: bestThumbnail?.height || undefined,
           songCount: Number(item.trackCount || item.itemCount) || 50,
           author: item.author || "YouTube Music",
           category: item.category || "Charts",
@@ -1521,7 +1726,7 @@ export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): 
       return true;
     });
 
-    const finalPlaylists = selectRelevantYouTubeTrendingPlaylists(uniquePlaylists);
+    const finalPlaylists = dedupeYouTubePlaylistCards(uniquePlaylists);
 
     await setCache(cacheKey, finalPlaylists);
     return finalPlaylists;

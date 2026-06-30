@@ -1,9 +1,15 @@
-import { getYouTubeMusicApiUrlForPlatform } from "./youtube-music-config";
+import Constants from "expo-constants";
+import * as Device from "expo-device";
+import { Platform } from "react-native";
+
+import { logger } from "@/lib/logger";
 
 const API_CONFIG = {
   songBaseUrl: "https://mavrixfy-song-api.vercel.app",
   appBaseUrl: "https://mavrixfy-song-api.vercel.app",
 } as const;
+
+export const PRODUCTION_YOUTUBE_MUSIC_API_URL = "https://mavrixfy-api-drab.vercel.app/api/youtube-music";
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
@@ -12,9 +18,34 @@ function normalizeBaseUrl(value: string): string {
 const SONG_API_BASE_URL = normalizeBaseUrl(API_CONFIG.songBaseUrl);
 const APP_API_BASE_URL = normalizeBaseUrl(process.env.EXPO_PUBLIC_APP_API_URL || API_CONFIG.appBaseUrl);
 
+function isHostOnlyDevelopmentUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "10.0.2.2";
+  } catch {
+    return false;
+  }
+}
+
 function getYouTubeMusicBaseUrl(): string {
-  const url = getYouTubeMusicApiUrlForPlatform();
-  return normalizeBaseUrl(url);
+  const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL?.trim();
+  const extraUrl = Constants.expoConfig?.extra?.youtubeMusicApiUrl?.trim();
+  const fallbackUrl = extraUrl || PRODUCTION_YOUTUBE_MUSIC_API_URL;
+
+  if (__DEV__ && envUrl && Platform.OS !== "web" && Device.isDevice && isHostOnlyDevelopmentUrl(envUrl)) {
+    logger.warn(
+      "[YouTube Music Config] Ignoring host-only development URL on a physical device. Use a LAN IP or the production proxy."
+    );
+    return normalizeBaseUrl(fallbackUrl);
+  }
+
+  if (envUrl) return normalizeBaseUrl(envUrl);
+  if (extraUrl) return normalizeBaseUrl(extraUrl);
+
+  logger.warn(
+    "[YouTube Music Config] Using production YouTube Music proxy. Set EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL for a different backend."
+  );
+  return normalizeBaseUrl(PRODUCTION_YOUTUBE_MUSIC_API_URL);
 }
 
 export function getMusicApiUrl(): string {

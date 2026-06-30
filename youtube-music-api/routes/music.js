@@ -302,10 +302,13 @@ function normalizeHomeShelf(section) {
       const id = getBrowseId(item);
       return (
         item?.item_type === "playlist" ||
+        item?.item_type === "album" ||
         id.startsWith("VL") ||
         id.startsWith("PL") ||
         id.startsWith("RDCLAK") ||
-        id.startsWith("RDTMAK")
+        id.startsWith("RDTMAK") ||
+        id.startsWith("OLAK") ||
+        id.startsWith("MPREb")
       );
     })
     .map((item) => normalizeCollectionItem(item, "playlist"))
@@ -548,7 +551,8 @@ router.get("/watch/:videoId", asyncRoute(async (req, res) => {
 }));
 
 router.get("/home", asyncRoute(async (req, res) => {
-  const limit = parsePositiveInt(req.query.limit, 3, 10);
+  const limit = parsePositiveInt(req.query.limit, 10, 12);
+
   const yt = await getYoutube();
   const home = await yt.music.getHomeFeed();
   const shelves = (home?.sections || [])

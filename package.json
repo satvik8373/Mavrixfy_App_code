@@ -7,6 +7,7 @@
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
     "start": "npx expo start",
     "start:expo-go": "npx expo start",
+    "fastapi": "npm --prefix youtube-music-api run fastapi",
     "lint": "npx expo lint",
     "lint:fix": "npx expo lint --fix",
     "android": "expo run:android",

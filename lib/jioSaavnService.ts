@@ -125,16 +125,6 @@ const JIOSAAVN_SEARCH_BASE_URLS = [
 
 export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
   {
-    id: "trending",
-    title: "Trending Now",
-    searchTerms: [
-      `trending songs ${CURRENT_YEAR}`,
-      `top hits ${CURRENT_YEAR}`,
-      "trending bollywood",
-      "trending hindi songs",
-    ],
-  },
-  {
     id: "new-arrivals",
     title: "New Releases",
     searchTerms: [
@@ -373,7 +363,17 @@ function normalizePlaylistList(raw: unknown): JioSaavnPlaylistResult[] {
         image,
         songCount,
       };
-    }, (playlist) => playlist.id && playlist.name && playlist.songCount > 0);
+    }, (playlist) => {
+      if (!playlist.id || !playlist.name || playlist.songCount <= 0) return false;
+      const lowerName = playlist.name.toLowerCase();
+      if (
+        lowerName.includes("recommended for you") ||
+        lowerName.includes("fresh discoveries")
+      ) {
+        return false;
+      }
+      return true;
+    });
 }
 
 function parsePlaylistSearchResponse(json: any): JioSaavnPlaylistResult[] {

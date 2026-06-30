@@ -23,6 +23,7 @@ export async function getYoutube() {
       location: process.env.YOUTUBE_MUSIC_LOCATION || "IN",
       retrieve_player: true,
       cookie: process.env.YOUTUBE_COOKIE || undefined,
+      visitor_data: process.env.YOUTUBE_VISITOR_DATA || undefined,
       po_token: process.env.YOUTUBE_PO_TOKEN || undefined,
     });
   }
