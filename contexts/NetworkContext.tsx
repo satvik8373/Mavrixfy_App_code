@@ -47,8 +47,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
       const state = await Network.getNetworkStateAsync();
       // isInternetReachable is the most reliable — it confirms actual internet
       // access, not just being connected to a Wi-Fi/cellular network.
-      const online =
-        state.isConnected === true && state.isInternetReachable !== false;
+      const online = state.isConnected === true;
       setIsOnline(online);
     } catch {
       // If the check itself fails, assume online to avoid false offline screens

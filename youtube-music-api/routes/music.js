@@ -491,6 +491,20 @@ async function resolveAudioStreamForRequest(req) {
   return resolveAudioStream(videoId);
 }
 
+function wantsAudioStreamJson(req) {
+  const accept = text(req.get("accept")).toLowerCase();
+  const format = text(req.query.format || req.query.response).toLowerCase();
+  return accept.includes("application/json") || format === "json" || format === "info";
+}
+
+function sendStreamJson(res, stream) {
+  res.json({
+    success: true,
+    data: stream,
+    stream,
+  });
+}
+
 router.get("/healthz", asyncRoute(async (_req, res) => {
   const yt = await getYoutube();
   res.json({
@@ -672,7 +686,15 @@ async function sendStream(req, res, headOnly = false) {
   Readable.fromWeb(upstream.body).pipe(res);
 }
 
-router.get("/stream/:videoId", asyncRoute((req, res) => sendStream(req, res, false)));
+router.get("/stream/:videoId", asyncRoute(async (req, res) => {
+  if (wantsAudioStreamJson(req)) {
+    const stream = await resolveAudioStreamForRequest(req);
+    sendStreamJson(res, stream);
+    return;
+  }
+
+  await sendStream(req, res, false);
+}));
 router.head("/stream/:videoId", asyncRoute((req, res) => sendStream(req, res, true)));
 
 router.get("/moods", (_req, res) => res.json([]));

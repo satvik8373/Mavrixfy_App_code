@@ -746,6 +746,25 @@ function getEndpointCandidates(
   return candidates;
 }
 
+function getAudioStreamEndpointCandidates(encodedVideoId: string): string[] {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+
+  for (const path of [
+    `/audio/${encodedVideoId}`,
+    `/stream-info/${encodedVideoId}`,
+    `/stream/${encodedVideoId}`,
+  ]) {
+    for (const candidate of getEndpointCandidates(path, path)) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
 function getSearchQueryCandidates(query: string, filter: string, limit: number): string[] {
   const encodedQuery = encodeURIComponent(query);
   return [
@@ -1030,10 +1049,11 @@ export async function getYouTubeMusicAudioStream(
       const encodedVideoId = encodeURIComponent(cleanVideoId);
 
       // ── Stream resolution via youtubei.js (Node.js backend) ──────────────
-      // The backend route /stream/:videoId uses youtubei.js internally.
-      // ytmusicapi is NOT used for streams — it is metadata-only.
+      // Prefer JSON resolver routes that return the direct audio URL. The visual
+      // iframe is only for background video; native lock-screen playback needs
+      // a real audio URL before TrackPlayer sees the song.
       const json = await fetchFirstJson<any>(
-        getEndpointCandidates(`/stream/${encodedVideoId}`, `/stream/${encodedVideoId}`),
+        getAudioStreamEndpointCandidates(encodedVideoId),
         signal
       );
 
